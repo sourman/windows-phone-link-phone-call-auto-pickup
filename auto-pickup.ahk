@@ -60,10 +60,9 @@ loop {
             FileAppend("`n`n", logFile)
             CurrentTime := A_TickCount
             for hwnd in candidates {
-                if (isWindowCloaked(hwnd)) {
-                    FileAppend("Toast candidate hwnd=" hwnd " is cloaked`n", logFile)
-                    continue
-                }
+                cloaked := isWindowCloaked(hwnd)
+                if (cloaked)
+                    FileAppend("Toast candidate hwnd=" hwnd " is cloaked but still under review`n", logFile)
 
                 WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
                 ; Heuristic: toast typically in bottom-right quadrant with dimensions similar to spy sample
@@ -76,14 +75,16 @@ loop {
                 ; Optional region filter (bottom-right of primary monitor)
                 monW := A_ScreenWidth, monH := A_ScreenHeight
                 if (x < monW * 0.5 && y < monH * 0.4) {
-                    FileAppend("Toast candidate hwnd=" hwnd " is in NOT in bottom-right quadrant: " x "," y "`n", logFile)
+                    FileAppend("Toast candidate hwnd=" hwnd " is in NOT in bottom-right quadrant: " x "," y "`n",
+                        logFile)
                     continue
                 }
 
                 FileAppend("Toast candidate hwnd=" hwnd " at " x "," y " " w "x" h "`n", logFile)
 
                 if ((CurrentTime - LastCallTime) <= 5000) {
-                    FileAppend("Toast candidate hwnd=" hwnd " is too recent: " (CurrentTime - LastCallTime) "ms`n", logFile)
+                    FileAppend("Toast candidate hwnd=" hwnd " is too recent: " (CurrentTime - LastCallTime) "ms`n",
+                    logFile)
                     continue
                 }
 
@@ -102,6 +103,28 @@ loop {
                 }
             }
         }
+    }
+    try {
+        if (FileExist(IncomingCallImage)) {
+            CurrentTime := A_TickCount
+            if ((CurrentTime - LastCallTime) > 5000) {
+                monW := A_ScreenWidth, monH := A_ScreenHeight
+                startX := Floor(monW * 0.5)
+                startY := Floor(monH * 0.2)
+                if (ImageSearch(&gx, &gy, startX, startY, monW - 1, monH - 1, "*90 " . IncomingCallImage)) {
+                    TrayTip("Incoming Call Detected!", "Global image match - answering...", 2)
+                    FileAppend("Global image search matched at " gx "," gy " - answering...`n", logFile)
+                    LastCallTime := CurrentTime
+                    Click(gx, gy)
+                    FileAppend("Clicked global match at " gx "," gy "`n`n", logFile)
+                    Sleep(500)
+                } else {
+                    FileAppend("Global image search no match this cycle`n", logFile)
+                }
+            }
+        }
+    } catch Error as e {
+        FileAppend("Global image search error: " e.Message "`n", logFile)
     }
     Sleep(1000) ; run this loop only once every second
 }
