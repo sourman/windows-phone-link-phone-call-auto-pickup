@@ -3,53 +3,42 @@
 ## Overview
 Chain of AutoHotkey scripts that automatically place a call when a TENEEN SMS notification is detected.
 
-## Current State (To Be Refactored)
-Current implementation uses file-based data passing (`call-on-sms-number.txt`) between step 2 and step 3, which is fragile and hard to test.
-
-## Target Architecture
+## Current Architecture
 
 ### Data Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ call-on-sms.ahk (Orchestrator)                                         │
-│ - Waits for TENEEN notification via image detection                    │
-│ - Runs steps 1-4 sequentially                                          │
+│ - Waits for TENEEN notification via OCR detection                      │
+│ - Runs steps 1-2 sequentially                                          │
 │ - Captures phone number from step 1 via EnvSet/temp file              │
-│ - Passes phone number to step 3 as CLI arg                            │
+│ - Passes phone number to step 2 as CLI arg                            │
 └─────────────────────────────────────────────────────────────────────────┘
          │
-         ├──► 1-click-notification.ahk
+         ├──► click_notification_1.ahk
+         │     - OCR detection finds TENEEN notification
          │     - Click notification → opens Phone Link to Messages view
-         │     - Extract phone number from Phone Link window text
+         │     - Extract phone number from Phone Link window text via OCR
          │     - Store via EnvSet("AUTO_PICKUP_PHONE") + temp file fallback
          │     - ExitApp(0) with number available
          │
-         ├──► 2-switch-to-calls.ahk
-         │     - Activate Phone Link window
-         │     - Send Ctrl+3 to switch to Calls panel
-         │     - (No phone number needed - removed extraction logic)
-         │
-         ├──► 3-enter-number.ahk "<PHONE_NUMBER>"
-         │     - Check A_Args[1] for phone number (primary)
-         │     - Fall back to temp file if arg empty (fallback)
-         │     - Type phone number in Search field
-         │     - Press Enter
-         │
-         └──► 4-place-call.ahk
-               - Click green call button
-               - (No phone number needed)
+         └──► enter_number_3.ahk "<PHONE_NUMBER>"
+               - Activate Phone Link window
+               - Send Ctrl+3 to switch to Calls panel
+               - Check A_Args[1] for phone number (primary)
+               - Fall back to temp file if arg empty (fallback)
+               - Type phone number in Search field
+               - Press Enter (this initiates the call)
 ```
 
 ### Component Responsibilities
 
 | Script | Input | Output | Responsibility |
 |--------|-------|--------|-----------------|
-| **call-on-sms.ahk** | None | Coordinates execution | Orchestrator - waits for notification, runs steps 1-4, captures phone from step 1, passes to step 3 |
-| **1-click-notification.ahk** | None | EnvVar + temp file | Click notification, extract phone from Phone Link window, store number |
-| **2-switch-to-calls.ahk** | None | None | Switch Phone Link to Calls panel (Ctrl+3) |
-| **3-enter-number.ahk** | CLI arg (phone) | None | Type phone number and press Enter |
-| **4-place-call.ahk** | None | None | Click call button |
+| **call-on-sms.ahk** | None | Coordinates execution | Orchestrator - waits for notification, runs steps 1-2, captures phone from step 1, passes to step 2 |
+| **click_notification_1.ahk** | None | EnvVar + temp file | Click notification, extract phone from Phone Link window via OCR, store number |
+| **enter_number_3.ahk** | CLI arg (phone) | None | Switch to Calls panel, type phone number, press Enter (initiates call) |
 
 ### Data Passing Mechanism
 
@@ -72,103 +61,79 @@ FileAppend(phone, tempFile)
 phone := FileRead(tempFile)
 ```
 
-**Step 3 receives via CLI arg:**
+**Step 2 receives via CLI arg:**
 ```ahk
 ; Orchestrator runs:
-Run(A_ScriptDir "\3-enter-number.ahk " phone)
+RunWait('"' A_ScriptDir '\enter_number_3.ahk" "' phone '"')
 
-; Step 3 reads:
+; Step 2 reads:
 if (A_Args.Length > 0)
     phone := A_Args[1]
 else
     phone := FileRead(tempFile)  ; fallback
 ```
 
-## Implementation Changes
+## Implementation Details
 
-### 1. 1-click-notification.ahk
-**Changes:**
-- Add phone number extraction from Phone Link window after clicking notification
-- Use `WinGetText()` to get window text content
-- Regex match for phone patterns: `\+\d[\d\s\-\(\)]{9,}` or `\d{10,}`
+### 1. click_notification_1.ahk
+**Purpose:** Click notification and extract phone number
+
+**Implementation:**
+- OCR detection finds TENEEN notification on screen
+- Clicks notification at OCR-detected coordinates
+- Waits for Phone Link to open
+- Captures Phone Link window header via screenshot + OCR
+- Regex match for phone patterns: `\d{10,}` then formats as `+{digits}`
 - Store via `EnvSet("AUTO_PICKUP_PHONE", phone)`
 - Write to temp file `call-on-sms-phone.tmp` as fallback
 - Log extraction success/failure
 
-**Removals:**
-- None (new functionality)
+### 2. enter_number_3.ahk
+**Purpose:** Switch to Calls panel and enter phone number
 
-### 2. 2-switch-to-calls.ahk
-**Changes:**
-- Remove phone number extraction logic entirely
-- Simplify to just activate Phone Link and send Ctrl+3
-- Remove file operations for phone number
-
-**Removals:**
-- All phone number extraction code
-- References to `call-on-sms-number.txt`
-- References to `call-on-sms-default-number.txt`
-
-### 3. 3-enter-number.ahk
-**Changes:**
+**Implementation:**
 - Check `A_Args[1]` for phone number first (primary method)
 - Fall back to reading `call-on-sms-phone.tmp` if arg empty
-- Remove old file-only approach using `call-on-sms-number.txt`
+- Activate Phone Link window
+- Send Ctrl+3 to switch to Calls panel
+- Type phone number in Search field
+- Press Enter (initiates the call)
 
-**Removals:**
-- References to `call-on-sms-number.txt`
-- References to `call-on-sms-default-number.txt`
+### 3. call-on-sms.ahk (Orchestrator)
+**Purpose:** Detect notification and coordinate execution
 
-### 4. 4-place-call.ahk
-**Changes:**
-- None (no data dependency)
+**Implementation:**
+- Runs OCR detection loop in top-right quadrant of screen
+- When TENEEN notification found:
+  - Click notification at OCR-detected coordinates
+  - Wait for Phone Link to open
+  - Run step 1 (`click_notification_1.ahk`)
+  - Capture phone number from EnvGet or temp file
+  - Run step 2 (`enter_number_3.ahk`) with phone as CLI arg
 
-**Removals:**
-- None
+```ahk
+; After step 1 completes, capture phone number:
+phone := EnvGet("AUTO_PICKUP_PHONE")
+if (phone = "" && FileExist(tempPhoneFile))
+    phone := FileRead(tempPhoneFile)
 
-### 5. call-on-sms.ahk (Orchestrator)
-**Changes:**
-- After step 1 completes, capture phone number:
-  ```ahk
-  Run(A_ScriptDir "\1-click-notification.ahk", , , &pid1)
-  WaitPid(pid1)
-
-  ; Capture phone number
-  phone := EnvGet("AUTO_PICKUP_PHONE")
-  if (phone = "" && FileExist(tempPhoneFile))
-      phone := FileRead(tempPhoneFile)
-
-  if (phone = "") {
-      FileAppend("Failed to capture phone number`n", logFile)
-      ExitApp(1)
-  }
-  ```
-- Pass phone number to step 3:
-  ```ahk
-  Run(A_ScriptDir "\3-enter-number.ahk " phone)
-  ```
-
-**Removals:**
-- None (orchestrator now owns data passing)
-
-## Files to Delete
-After implementation, these files are no longer needed:
-- `call-on-sms-number.txt` (if exists)
-- `call-on-sms-default-number.txt` (if exists)
+; Pass phone number to step 2:
+RunWait('"' A_ScriptDir '\enter_number_3.ahk" "' phone '"')
+```
 
 ## Testing
 
 ### Manual Testing Steps
 1. **Test step 1 independently:**
    ```powershell
-   .\1-click-notification.ahk
+   .\click_notification_1.ahk
    # Check that phone number is in EnvVar and temp file
    ```
 
-2. **Test step 3 with CLI arg:**
+2. **Test step 2 with CLI arg:**
    ```powershell
-   .\3-enter-number.ahk "+16478525107"
-   # Should type the number and press Enter
+   .\enter_number_3.ahk "+16478525107"
+   # Should switch to calls, type the number and press Enter
    ```
 
 3. **Test full orchestrator:**
@@ -180,7 +145,7 @@ After implementation, these files are no longer needed:
 ### Expected Behavior
 - Step 1 extracts phone number from Phone Link conversation header
 - Phone number is available via environment variable to orchestrator
-- Orchestrator passes phone number to step 3 as CLI argument
+- Orchestrator passes phone number to step 2 as CLI argument
 - No file I/O dependency between steps (except temp file fallback)
 - Individual steps can be tested in isolation with CLI args
 

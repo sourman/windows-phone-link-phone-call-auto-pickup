@@ -40,7 +40,38 @@ Sleep(300)
 Send("^3")
 Sleep(500)
 Send(phone)
-Sleep(100)
-Send("{Enter}")
-FileAppend("Step 3: sent number and Enter`n", logFile)
+Sleep(500)
+
+; Image search for the call button
+CoordMode("Pixel", "Screen")
+CoordMode("Mouse", "Screen")
+callButtonImage := A_ScriptDir "\assets\call_button.png"
+
+if (FileExist(callButtonImage)) {
+    FileAppend("Step 3: searching for call button image...`n", logFile)
+    ; Load image to get dimensions for center clicking
+    pic := LoadPicture(callButtonImage)
+    imgWidth := pic.OriginalWidth
+    imgHeight := pic.OriginalHeight
+    centerX := Floor(imgWidth / 2)
+    centerY := Floor(imgHeight / 2)
+    FileAppend("Step 3: call button image is " imgWidth "x" imgHeight ", center offset: " centerX "," centerY "`n", logFile)
+
+    ; Search entire screen for call button
+    if (ImageSearch(&gx, &gy, 0, 0, A_ScreenWidth - 1, A_ScreenHeight - 1, "*30 " . callButtonImage)) {
+        FileAppend("Step 3: found call button at " gx "," gy " - clicking`n", logFile)
+        ; click the center of the call button
+        Click(gx + centerX, gy + centerY)
+        Sleep(200)
+        FileAppend("Step 3: clicked call button`n", logFile)
+    } else {
+        FileAppend("Step 3: call button image not found, falling back to Enter`n", logFile)
+        Send("{Enter}")
+    }
+} else {
+    FileAppend("Step 3: call button image not found at " callButtonImage ", using Enter`n", logFile)
+    Send("{Enter}")
+}
+
+FileAppend("Step 3: done`n", logFile)
 ExitApp(0)
