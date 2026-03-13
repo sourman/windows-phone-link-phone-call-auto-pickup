@@ -14,6 +14,16 @@ Automatically answer incoming calls on Microsoft Phone Link and open Perplexity 
 - `find-windows.ahk` - Helper script to identify window names and controls
 - `setup-guide.md` - Detailed setup and troubleshooting instructions
 
+### Call on SMS (TENEEN → call back)
+
+- `call-on-sms.ahk` - Loop: image-match TENEEN notification, then run steps 1–4
+- `1-click-notification.ahk` - Click the notification (opens Phone Link to Messages)
+- `2-switch-to-calls.ahk` - Read number from Phone Link, write to `call-on-sms-number.txt`, send Ctrl+3
+- `3-enter-number.ahk` - Type number in Search your contacts, Enter
+- `4-place-call.ahk` - Click green call button
+
+**Assets (in `assets/`):** `notification-teneen.png` (crop of the Messages popup with TENEEN), `call-button.png` (crop of the green call button in Calls panel). Test each step script on its own.
+
 ## Controls
 
 - `Win+P` - Pause/resume script
