@@ -49,6 +49,7 @@ loop {
                     Click(gx, gy)
                     FileAppend("Clicked global match at " gx "," gy "`n`n", logFile)
                     Sleep(500)
+                    Run(A_ScriptDir "\open-comet-voice-close.ahk")
                 } else {
                     FileAppend("Global image search no match this cycle`n", logFile)
                 }
