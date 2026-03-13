@@ -10,42 +10,43 @@ Chain of AutoHotkey scripts that automatically place a call when a TENEEN SMS no
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ call-on-sms.ahk (Orchestrator)                                         │
-│ - Waits for TENEEN notification via OCR detection                      │
-│ - Runs steps 1-2 sequentially                                          │
-│ - Captures phone number from step 1 via EnvSet/temp file              │
+│ - Loops continuously, calling step 1 via RunWait()                     │
+│ - When step 1 exits successfully, reads phone number                   │
 │ - Passes phone number to step 2 as CLI arg                            │
+│ - No OCR detection in orchestrator - step 1 handles detection         │
 └─────────────────────────────────────────────────────────────────────────┘
          │
-         ├──► click_notification_1.ahk
+         ├──► click_notification_1.ahk (Step 1)
+         │     - Loops continuously scanning for TENEEN notification
          │     - OCR detection finds TENEEN notification
          │     - Click notification → opens Phone Link to Messages view
-         │     - Extract phone number from Phone Link window text via OCR
-         │     - Store via EnvSet("AUTO_PICKUP_PHONE") + temp file fallback
-         │     - ExitApp(0) with number available
+         │     - Publish phone number via EnvSet("AUTO_PICKUP_PHONE")
+         │     - IMPORTANT: ExitApp(0) when done (does not loop forever)
+         │     - Orchestrator's RunWait() unblocks when step 1 exits
          │
-         └──► enter_number_3.ahk "<PHONE_NUMBER>"
-               - Activate Phone Link window
+         └──► enter_number_2.ahk "<PHONE_NUMBER>" (Step 2)
+               - Activate Phone Link window (launch if closed)
                - Send Ctrl+3 to switch to Calls panel
                - Check A_Args[1] for phone number (primary)
                - Fall back to temp file if arg empty (fallback)
                - Type phone number in Search field
-               - Press Enter (this initiates the call)
+               - Image search for call button → click, or fallback to Enter
 ```
 
 ### Component Responsibilities
 
 | Script | Input | Output | Responsibility |
 |--------|-------|--------|-----------------|
-| **call-on-sms.ahk** | None | Coordinates execution | Orchestrator - waits for notification, runs steps 1-2, captures phone from step 1, passes to step 2 |
-| **click_notification_1.ahk** | None | EnvVar + temp file | Click notification, extract phone from Phone Link window via OCR, store number |
-| **enter_number_3.ahk** | CLI arg (phone) | None | Switch to Calls panel, type phone number, press Enter (initiates call) |
+| **call-on-sms.ahk** | None | Coordinates execution | Simple orchestrator - loops calling step 1, reads phone number, passes to step 2 |
+| **click_notification_1.ahk** | None | EnvVar + temp file | Loop to detect notification, click it, publish phone number, **EXIT** when done |
+| **enter_number_2.ahk** | CLI arg (phone) | None | Switch to Calls panel, type phone number, press Enter/call button |
 
 ### Data Passing Mechanism
 
 **Primary:** Environment Variable
 ```ahk
 ; Step 1 writes:
-EnvSet("AUTO_PICKUP_PHONE", "+16478525107")
+EnvSet("AUTO_PICKUP_PHONE", "+16479163598")
 
 ; Orchestrator reads:
 phone := EnvGet("AUTO_PICKUP_PHONE")
@@ -64,7 +65,7 @@ phone := FileRead(tempFile)
 **Step 2 receives via CLI arg:**
 ```ahk
 ; Orchestrator runs:
-RunWait('"' A_ScriptDir '\enter_number_3.ahk" "' phone '"')
+RunWait('"' A_ScriptDir '\enter_number_2.ahk" "' phone '"')
 
 ; Step 2 reads:
 if (A_Args.Length > 0)
@@ -75,50 +76,59 @@ else
 
 ## Implementation Details
 
-### 1. click_notification_1.ahk
-**Purpose:** Click notification and extract phone number
+### 1. click_notification_1.ahk (Step 1)
+**Purpose:** Detect notification, click it, and publish phone number
 
 **Implementation:**
-- OCR detection finds TENEEN notification on screen
-- Clicks notification at OCR-detected coordinates
+- Loops continuously scanning for TENEEN notification (OCR or image search)
+- When found: clicks notification at detected coordinates
 - Waits for Phone Link to open
-- Captures Phone Link window header via screenshot + OCR
-- Regex match for phone patterns: `\d{10,}` then formats as `+{digits}`
-- Store via `EnvSet("AUTO_PICKUP_PHONE", phone)`
-- Write to temp file `call-on-sms-phone.tmp` as fallback
-- Log extraction success/failure
+- **IMPORTANT:** Does NOT loop forever - exits after successful click
+- Publishes phone number via:
+  - `EnvSet("AUTO_PICKUP_PHONE", phone)` (primary)
+  - Temp file `call-on-sms-phone.tmp` (fallback)
+- **Currently:** Phone number is hardcoded (`PHONE_NUMBER := "+16479163598"`) as a shortcut
+- **TODO:** Extract phone number from Phone Link window via OCR
+- ExitApp(0) on success, ExitApp(1) on failure
 
-### 2. enter_number_3.ahk
-**Purpose:** Switch to Calls panel and enter phone number
+### 2. enter_number_2.ahk
+**Purpose:** Switch to Calls panel and initiate call
 
 **Implementation:**
 - Check `A_Args[1]` for phone number first (primary method)
 - Fall back to reading `call-on-sms-phone.tmp` if arg empty
-- Activate Phone Link window
+- Activate Phone Link window (launch via `ms-phone://` if not running)
 - Send Ctrl+3 to switch to Calls panel
 - Type phone number in Search field
-- Press Enter (initiates the call)
+- Image search for call button (assets/call_button.png) and click center
+- Fallback to Enter if image not found
+- ExitApp(0) on success
 
 ### 3. call-on-sms.ahk (Orchestrator)
-**Purpose:** Detect notification and coordinate execution
+**Purpose:** Coordinate execution between step 1 and step 2
 
 **Implementation:**
-- Runs OCR detection loop in top-right quadrant of screen
-- When TENEEN notification found:
-  - Click notification at OCR-detected coordinates
-  - Wait for Phone Link to open
-  - Run step 1 (`click_notification_1.ahk`)
+- Simple loop - no OCR detection in orchestrator
+- Calls step 1 via `RunWait()` - blocks until step 1 exits
+- If step 1 succeeds (exit code 0):
   - Capture phone number from EnvGet or temp file
-  - Run step 2 (`enter_number_3.ahk`) with phone as CLI arg
+  - Run step 2 (`enter_number_2.ahk`) with phone as CLI arg
+- If step 1 fails, loop continues
 
 ```ahk
-; After step 1 completes, capture phone number:
-phone := EnvGet("AUTO_PICKUP_PHONE")
-if (phone = "" && FileExist(tempPhoneFile))
-    phone := FileRead(tempPhoneFile)
-
-; Pass phone number to step 2:
-RunWait('"' A_ScriptDir '\enter_number_3.ahk" "' phone '"')
+; Main loop:
+loop {
+    exitCode := RunWait('"' A_ScriptDir '\click_notification_1.ahk"')
+    if (exitCode = 0) {
+        ; Step 1 found notification, clicked, and published phone
+        phone := EnvGet("AUTO_PICKUP_PHONE")
+        if (phone = "" && FileExist(tempPhoneFile))
+            phone := FileRead(tempPhoneFile)
+        ; Pass to step 2:
+        RunWait('"' A_ScriptDir '\enter_number_2.ahk" "' phone '"')
+    }
+    Sleep(1000)
+}
 ```
 
 ## Testing
@@ -127,12 +137,13 @@ RunWait('"' A_ScriptDir '\enter_number_3.ahk" "' phone '"')
 1. **Test step 1 independently:**
    ```powershell
    .\click_notification_1.ahk
-   # Check that phone number is in EnvVar and temp file
+   # Should loop until TENEEN notification appears, then click and exit
+   # Check that phone number is in EnvVar and temp file after exit
    ```
 
 2. **Test step 2 with CLI arg:**
    ```powershell
-   .\enter_number_3.ahk "+16478525107"
+   .\enter_number_2.ahk "+16479163598"
    # Should switch to calls, type the number and press Enter
    ```
 
@@ -143,10 +154,11 @@ RunWait('"' A_ScriptDir '\enter_number_3.ahk" "' phone '"')
    ```
 
 ### Expected Behavior
-- Step 1 extracts phone number from Phone Link conversation header
-- Phone number is available via environment variable to orchestrator
-- Orchestrator passes phone number to step 2 as CLI argument
-- No file I/O dependency between steps (except temp file fallback)
+- Step 1 (click_notification_1.ahk) loops until TENEEN notification found
+- When found: clicks notification, publishes phone number (currently hardcoded), exits
+- Orchestrator's RunWait() unblocks, reads phone number from step 1
+- Orchestrator passes phone to step 2 as CLI argument
+- Step 2 activates Phone Link, switches to Calls, types number, initiates call
 - Individual steps can be tested in isolation with CLI args
 
 ## Benefits
@@ -159,7 +171,9 @@ RunWait('"' A_ScriptDir '\enter_number_3.ahk" "' phone '"')
 
 ## Notes
 
+- **Orchestrator is dumb/simple** - just loops calling step 1, no detection logic
+- **Step 1 does all the work** - detection, clicking, publishing phone, then exits
+- RunWait() blocking is intentional - orchestrator waits for step 1 to finish
 - Environment variables are process-local in Windows, so EnvSet in step 1 is visible to orchestrator (same process tree)
 - Temp file fallback is needed for cases where EnvSet doesn't propagate (different process contexts)
-- Phone number extraction from Phone Link uses WinGetText (faster than full OCR)
-- Regex patterns handle both international format (+1 647-852-5107) and plain digits
+- **Phone number is currently hardcoded** as shortcut (`+16479163598`), OCR extraction TODO

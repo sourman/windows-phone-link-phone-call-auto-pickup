@@ -1,81 +1,105 @@
+; AutoHotkey v2 script to detect and click notifications in bottom-right corner
+; Monitors for Windows-style toasts and clicks them when found
+; When found: clicks notification, publishes phone number, then exits
+
 #Requires AutoHotkey v2.0
+#SingleInstance Force
+SendMode("Input")
+SetWorkingDir(A_ScriptDir)
 
-logFile := "C:\Users\USER\workspace\auto-pickup\test-simple.log"
-capturePath := "C:\Users\USER\workspace\auto-pickup\capture.png"
-ocrScript := "C:\Users\USER\workspace\auto-pickup\o.ps1"
-tmpPhoneFile := "C:\Users\USER\workspace\auto-pickup\call-on-sms-phone.tmp"
+; Improve reliability detecting transient/hosted windows
+DetectHiddenWindows(true)
+SetWinDelay(0)
 
-FileAppend("=== START ===`n", logFile)
+; Create or overwrite log file
+logFile := "call-on-sms.log"
+tempPhoneFile := A_ScriptDir "\call-on-sms-phone.tmp"
+PHONE_NUMBER := "+16479163598"  ; TODO: Extract via OCR instead of hardcoded
 
-Sleep(3000)
-FileAppend("Clicking...`n", logFile)
+FileAppend("Step 1 starting at " A_Now "`n", logFile)
 
-w := A_ScreenWidth
-h := A_ScreenHeight
-Click(w - 300, h - 250)
+; Match window titles partially
+SetTitleMatchMode(2)
 
-Sleep(3000)
-FileAppend("Finding Phone Link...`n", logFile)
+; Use screen coordinates for pixel/mouse ops
+CoordMode("Pixel", "Screen")
+CoordMode("Mouse", "Screen")
 
-win := "ahk_exe PhoneExperienceHost.exe"
-if (WinExist(win)) {
-    FileAppend("Phone Link found!`n", logFile)
-    WinActivate(win)
-    Sleep(1000)
+; Template image for notification detection
+NotificationImage := A_ScriptDir "\assets\notification-teneen.png"
 
-    WinGetPos(&x, &y, &ww, &wh, win)
-    FileAppend("Window: " x "," y "," ww "," wh "`n", logFile)
+; Set up hotkeys for manual control
+#p:: Pause()
+#s:: Suspend()
 
-    psCmd := "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
-    psCmd .= "$bmp = [System.Drawing.Bitmap]::new(" . ww . ",150); "
-    psCmd .= "$g = [System.Drawing.Graphics]::FromImage($bmp); "
-    psCmd .= "$g.CopyFromScreen(" . x . "," . y . ",0,0); "
-    psCmd .= "$bmp.Save('" . capturePath . "'); $g.Dispose(); $bmp.Dispose()"
+TrayTip("Notification Clicker", "Script Started - Monitoring for notifications...", 2)
 
-    RunWait('PowerShell.exe -Command "' . psCmd . '"', , "Hide")
-    FileAppend("Captured`n", logFile)
+; Track last detection to avoid spam clicking
+LastDetectionTime := 0
+DEBOUNCE_MS := 3000  ; Wait 3 seconds between detections
 
-    psOCR := "Add-Type -AssemblyName System.Runtime.WindowsRuntime;"
-    psOCR .= "[Windows.Media.Ocr.OcrEngine,Windows,ContentType=WindowsRuntime]|Out-Null;"
-    psOCR .= "[Windows.Graphics.Imaging.BitmapDecoder,Windows,ContentType=WindowsRuntime]|Out-Null;"
-    psOCR .= "$b=[System.Drawing.Bitmap]::new('" . capturePath . "');"
-    psOCR .= "$s=[System.IO.MemoryStream]::new();"
-    psOCR .= "$b.Save($s,[System.Drawing.Imaging.ImageFormat]::Png);"
-    psOCR .= "$s.Position=0;"
-    psOCR .= "$d=[Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($s).GetAwaiter().GetResult();"
-    psOCR .= "$f=$d.GetFrameAsync(0).GetAwaiter().GetResult();"
-    psOCR .= "$e=[Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages();"
-    psOCR .= "$r=$e.RecognizeAsync($f).GetAwaiter().GetResult();"
-    psOCR .= "$r.Text"
+loop {
+    try {
+        if (FileExist(NotificationImage)) {
+            CurrentTime := A_TickCount
+            if ((CurrentTime - LastDetectionTime) > DEBOUNCE_MS) {
 
-    FileDelete(ocrScript)
-    FileAppend(psOCR, ocrScript, "UTF-8")
+                ; Search region: bottom-right quadrant of screen
+                monW := A_ScreenWidth
+                monH := A_ScreenHeight
 
-    shell := ComObject("WScript.Shell")
-    exec := shell.Exec("PowerShell.exe -ExecutionPolicy Bypass -File " . ocrScript)
+                ; Start from right side, bottom 20% of screen
+                startX := Floor(monW * 0.5)
+                startY := Floor(monH * 0.8)
 
-    ocrText := ""
-    while (!exec.StdOut.AtEndOfStream) {
-        ocrText .= exec.StdOut.ReadAll()
+                FileAppend("Searching region: (" startX "," startY ") to (" monW "," monH ")`n", logFile)
+
+                ; ImageSearch with 80% similarity tolerance (*80)
+                ; Lower tolerance = more strict, Higher = more lenient
+                if (ImageSearch(&foundX, &foundY, startX, startY, monW - 1, monH - 1, "*80 " . NotificationImage)) {
+                    FileAppend("NOTIFICATION FOUND at " foundX "," foundY " - clicking...`n", logFile)
+
+                    LastDetectionTime := CurrentTime
+
+                    ; Click the notification
+                    Click(foundX, foundY)
+
+                    FileAppend("Clicked notification`n", logFile)
+                    Sleep(500)
+
+                    ; Wait for Phone Link to open
+                    Sleep(1500)
+
+                    ; Publish phone number via EnvSet (primary method)
+                    try {
+                        EnvSet("AUTO_PICKUP_PHONE", PHONE_NUMBER)
+                        FileAppend("Step 1: Set AUTO_PICKUP_PHONE env var`n", logFile)
+                    } catch as e {
+                        FileAppend("Step 1: EnvSet failed: " e.Message "`n", logFile)
+                    }
+
+                    ; Fallback: write to temp file
+                    try {
+                        if (FileExist(tempPhoneFile))
+                            FileDelete(tempPhoneFile)
+                        FileAppend(PHONE_NUMBER, tempPhoneFile)
+                        FileAppend("Step 1: Wrote phone to temp file: " PHONE_NUMBER "`n", logFile)
+                    } catch as e {
+                        FileAppend("Step 1: Temp file write failed: " e.Message "`n", logFile)
+                    }
+
+                    ; SUCCESS - Exit with code 0 so orchestrator's RunWait returns
+                    FileAppend("Step 1: Done, exiting with success`n`n", logFile)
+                    ExitApp(0)
+                } else {
+                    FileAppend(".", logFile)  ; Dot per scan for activity indicator
+                }
+            }
+        } else {
+            FileAppend("WARNING: Notification image not found: " NotificationImage "`n", logFile)
+        }
+    } catch Error as e {
+        FileAppend("Error: " e.Message "`n", logFile)
     }
-
-    FileAppend("OCR: [" ocrText . "]`n", logFile)
-
-    phone := ""
-    if (RegExMatch(ocrText, "\d{10,}", &m))
-        phone := m[0]
-
-    if (phone != "") {
-        phone := "+" . RegExReplace(phone, "\D", "")
-        FileAppend("PHONE: " phone "`n", logFile)
-        EnvSet("AUTO_PICKUP_PHONE", phone)
-        FileDelete(tmpPhoneFile)
-        FileAppend(phone, tmpPhoneFile)
-        FileAppend("SUCCESS!`n", logFile)
-    }
-} else {
-    FileAppend("Phone Link NOT found`n", logFile)
+    Sleep(500)  ; Check twice per second
 }
-
-FileAppend("=== END ===`n", logFile)
-ExitApp(0)
