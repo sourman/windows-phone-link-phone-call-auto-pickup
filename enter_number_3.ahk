@@ -31,8 +31,21 @@ if (phone = "") {
 }
 
 if (!WinExist("Phone Link")) {
-    FileAppend("Step 3: Phone Link not found`n", logFile)
-    ExitApp(1)
+    FileAppend("Step 3: Phone Link not found, launching...`n", logFile)
+    Run("ms-phone://")
+    ; Wait for Phone Link to open (max 10 seconds)
+    Loop 100 {
+        if (WinExist("Phone Link")) {
+            FileAppend("Step 3: Phone Link launched`n", logFile)
+            break
+        }
+        Sleep(100)
+    }
+    if (!WinExist("Phone Link")) {
+        FileAppend("Step 3: Phone Link failed to launch`n", logFile)
+        ExitApp(1)
+    }
+    Sleep(1000)  ; Give it extra time to fully load
 }
 
 WinActivate("Phone Link")
@@ -49,19 +62,15 @@ callButtonImage := A_ScriptDir "\assets\call_button.png"
 
 if (FileExist(callButtonImage)) {
     FileAppend("Step 3: searching for call button image...`n", logFile)
-    ; Load image to get dimensions for center clicking
-    pic := LoadPicture(callButtonImage)
-    imgWidth := pic.OriginalWidth
-    imgHeight := pic.OriginalHeight
-    centerX := Floor(imgWidth / 2)
-    centerY := Floor(imgHeight / 2)
-    FileAppend("Step 3: call button image is " imgWidth "x" imgHeight ", center offset: " centerX "," centerY "`n", logFile)
+    ; Call button image is 90x90, click center
+    BUTTON_OFFSET_X := 45
+    BUTTON_OFFSET_Y := 45
 
     ; Search entire screen for call button
     if (ImageSearch(&gx, &gy, 0, 0, A_ScreenWidth - 1, A_ScreenHeight - 1, "*30 " . callButtonImage)) {
         FileAppend("Step 3: found call button at " gx "," gy " - clicking`n", logFile)
         ; click the center of the call button
-        Click(gx + centerX, gy + centerY)
+        Click(gx + BUTTON_OFFSET_X, gy + BUTTON_OFFSET_Y)
         Sleep(200)
         FileAppend("Step 3: clicked call button`n", logFile)
     } else {
