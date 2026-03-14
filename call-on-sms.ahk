@@ -12,6 +12,7 @@ logFile := "call-on-sms.log"
 tempPhoneFile := A_ScriptDir "\call-on-sms-phone.tmp"
 step1Script := A_ScriptDir "\click_notification_1.ahk"
 step2Script := A_ScriptDir "\enter_number_2.ahk"
+step3Script := A_ScriptDir "\open-comet-voice.ahk"
 
 FileAppend("Orchestrator starting at " A_Now "`n`n", logFile)
 
@@ -51,6 +52,15 @@ loop {
                 FileAppend("Orchestrator: Step 2 succeeded - sequence complete`n`n", logFile)
             } else {
                 FileAppend("Orchestrator: Step 2 failed with exit code " exitCode "`n", logFile)
+            }
+
+            ; Step 3: Open comet voice
+            FileAppend("Orchestrator: Calling step 3...`n", logFile)
+            exitCode := RunWait('"' step3Script '"')
+            if (exitCode = 0) {
+                FileAppend("Orchestrator: Step 3 succeeded - opened comet voice`n", logFile)
+            } else {
+                FileAppend("Orchestrator: Step 3 failed with exit code " exitCode "`n", logFile)
             }
 
             ; Debounce - wait before starting next cycle

@@ -15,6 +15,7 @@ SetWinDelay(0)
 logFile := "call-on-sms.log"
 tempPhoneFile := A_ScriptDir "\call-on-sms-phone.tmp"
 PHONE_NUMBER := "01280043725"  ; TODO: Extract via OCR instead of hardcoded
+DEBUG_MODE := false
 
 FileAppend("Step 1 starting at " A_Now "`n", logFile)
 
@@ -48,7 +49,9 @@ loop {
                 endX   := Floor(monW * 0.905)  ; 90.5%
                 endY   := Floor(monH * 0.875)  ; 87.5%
 
-                FileAppend("Searching region: (" startX "," startY ") to (" endX "," endY ")`n", logFile)
+                if (DEBUG_MODE) {
+                    FileAppend("Searching region: (" startX "," startY ") to (" endX "," endY ")`n", logFile)
+                }
 
                 ; ImageSearch options for shape/color-insensitive matching:
                 ; *150 - shades of variation (0-255). Higher = more color tolerant
@@ -94,7 +97,7 @@ loop {
                     ; SUCCESS - Exit with code 0 so orchestrator's RunWait returns
                     FileAppend("Step 1: Done, exiting with success`n`n", logFile)
                     ExitApp(0)
-                } else {
+                } else if (DEBUG_MODE) {
                     FileAppend(".", logFile)  ; Dot per scan for activity indicator
                 }
                 ; sleep for a bit to slow down CPU usage
