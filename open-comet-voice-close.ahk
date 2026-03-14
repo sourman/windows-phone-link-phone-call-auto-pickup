@@ -17,7 +17,8 @@ for hwnd in existing
 FileAppend("`n`n", logFile)
 
 ; Launch Comet
-cometPath := "C:\\Users\\USER\\AppData\\Local\\Perplexity\\Comet\\Application\\comet.exe"
+LocalAppData := EnvGet("LOCALAPPDATA")
+cometPath := LocalAppData "\Perplexity\Comet\Application\comet.exe"
 try {
     pid := Run('"' cometPath '"')
 } catch Error as e {

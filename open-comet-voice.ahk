@@ -17,7 +17,8 @@ for hwnd in existing
 FileAppend("`n`n", logFile)
 
 ; Launch Comet
-cometPath := "C:\\Users\\USER\\AppData\\Local\\Perplexity\\Comet\\Application\\comet.exe"
+LocalAppData := EnvGet("LOCALAPPDATA")
+cometPath := LocalAppData "\Perplexity\Comet\Application\comet.exe"
 try {
     pid := Run('"' cometPath '"')
 } catch Error as e {
@@ -30,7 +31,7 @@ newHwnd := 0
 timeoutMs := 15000
 start := A_TickCount
 while ((A_TickCount - start) < timeoutMs) {
-    Sleep(2500) ; In testing foud that any sleep time less than 1 second gives fals data s the
+    Sleep(2500) ; In testing found that any sleep time less than 1 second gives false data as the
     ; window is not available immediately
     current := WinGetList("ahk_exe comet.exe")
     FileAppend("Current windows and their ahk_ids in one go: " current.Length "`n`n", logFile)
@@ -76,18 +77,8 @@ if !WinWaitActive("ahk_id " newHwnd, , 10) {
     ExitApp
 }
 
-; Send Alt+Shift+V
+; Send Alt+Shift+V to enable comet voice mode
 Send("!+v")
 
-; Wait 20 seconds
-Sleep(40000)
-
-; Close only the window we opened
-WinClose("ahk_id " newHwnd)
-WinWaitClose("ahk_id " newHwnd, , 5)
-
-FileAppend("We should have closed comet by now. the ahk_id is " newHwnd "`n`n", logFile)
-
-Sleep(10000)
 
 ExitApp
