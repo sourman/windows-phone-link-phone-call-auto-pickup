@@ -4,17 +4,27 @@
 SendMode("Input")
 SetWorkingDir(A_ScriptDir)
 
-; Create or overwrite log file
 logFile := "comet-voice-close.log"
-FileAppend("Starting script at " A_Now "`n`n", logFile)
+
+Timestamp() {
+    months := ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    return months[A_Mon] " " A_MDay ", " A_Hour ":" A_Min ":" A_Sec
+}
+
+Log(msg) {
+    global logFile
+    FileAppend("[" Timestamp() "] " msg "`n", logFile)
+}
+
+Log("Step 3 starting")
 
 ; Track existing Comet windows
 existing := WinGetList("ahk_exe comet.exe")
-FileAppend("Existing windows and their ahk_ids in one go: " existing.Length "`n`n", logFile)
-FileAppend("Current window IDs: ", logFile)
+Log("Existing windows and their ahk_ids: " existing.Length)
+ids := ""
 for hwnd in existing
-    FileAppend("ahk_id " hwnd ", ", logFile)
-FileAppend("`n`n", logFile)
+    ids .= "ahk_id " hwnd ", "
+Log("Current window IDs: " RTrim(ids, ", "))
 
 ; Launch Comet
 LocalAppData := EnvGet("LOCALAPPDATA")
@@ -22,7 +32,7 @@ cometPath := LocalAppData "\Perplexity\Comet\Application\comet.exe"
 try {
     pid := Run('"' cometPath '"')
 } catch Error as e {
-    FileAppend("Failed to start Comet: " e.Message "`n`n", logFile)
+    Log("Failed to start Comet: " e.Message)
     ExitApp
 }
 
@@ -34,14 +44,14 @@ while ((A_TickCount - start) < timeoutMs) {
     Sleep(2500) ; In testing found that any sleep time less than 1 second gives false data as the
     ; window is not available immediately
     current := WinGetList("ahk_exe comet.exe")
-    FileAppend("Current windows and their ahk_ids in one go: " current.Length "`n`n", logFile)
-    FileAppend("Current window IDs: ", logFile)
+    Log("Current windows: " current.Length)
+    ids := ""
     for hwnd in current
-        FileAppend("ahk_id " hwnd ", ", logFile)
-    FileAppend("`n`n", logFile)
+        ids .= "ahk_id " hwnd ", "
+    Log("Current window IDs: " RTrim(ids, ", "))
     for hwnd in current {
         if !existing.Has(hwnd) {
-            FileAppend("New window found with ahk_id: " hwnd "`n`n", logFile)
+            Log("New window found with ahk_id: " hwnd)
             newHwnd := hwnd
             break
         }
@@ -52,7 +62,7 @@ while ((A_TickCount - start) < timeoutMs) {
 }
 
 if (!newHwnd) {
-    FileAppend("No new window found after " (A_TickCount - start) "ms`n`n", logFile)
+    Log("No new window found after " (A_TickCount - start) "ms")
     ; Fallback to pid mapping (in case there were no prior windows)
     if (existing.Length = 0) {
         WinWait("ahk_exe comet.exe", , 10)
@@ -64,16 +74,16 @@ if (!newHwnd) {
 }
 
 if (!newHwnd) {
-    FileAppend("Could not find the newly opened Comet window.`n`n", logFile)
+    Log("Could not find the newly opened Comet window.")
     ExitApp
 }
 
 ; Activate the new window and wait until it's active
 Sleep(200)
 WinActivate("ahk_id " newHwnd)
-FileAppend("Activating window with ahk_id: " newHwnd "`n`n", logFile)
+Log("Activating window with ahk_id: " newHwnd)
 if !WinWaitActive("ahk_id " newHwnd, , 10) {
-    FileAppend("Comet window did not become active.`n`n", logFile)
+    Log("Comet window did not become active.")
     ExitApp
 }
 

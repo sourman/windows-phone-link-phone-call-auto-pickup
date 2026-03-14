@@ -11,13 +11,22 @@ SetWorkingDir(A_ScriptDir)
 DetectHiddenWindows(true)
 SetWinDelay(0)
 
-; Create or overwrite log file
 logFile := "call-on-sms.log"
 tempPhoneFile := A_ScriptDir "\call-on-sms-phone.tmp"
 PHONE_NUMBER := "01280043725"  ; TODO: Extract via OCR instead of hardcoded
 DEBUG_MODE := false
 
-FileAppend("Step 1 starting at " A_Now "`n", logFile)
+Timestamp() {
+    months := ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    return months[A_Mon] " " A_MDay ", " A_Hour ":" A_Min ":" A_Sec
+}
+
+Log(msg) {
+    global logFile
+    FileAppend("[" Timestamp() "] " msg "`n", logFile)
+}
+
+Log("Step 1 starting")
 
 ; Match window titles partially
 SetTitleMatchMode(2)
@@ -50,7 +59,7 @@ loop {
                 endY   := Floor(monH * 0.875)  ; 87.5%
 
                 if (DEBUG_MODE) {
-                    FileAppend("Searching region: (" startX "," startY ") to (" endX "," endY ")`n", logFile)
+                    Log("Step 1: Searching region: (" startX "," startY ") to (" endX "," endY ")")
                 }
 
                 ; ImageSearch options for shape/color-insensitive matching:
@@ -61,14 +70,14 @@ loop {
                 ; Notes: *255 would match ALL colors (shape-only), but increases false positives
                 ;        150 is a good balance for notifications that may vary by theme/light-dark mode
                 if (ImageSearch(&foundX, &foundY, startX, startY, endX, endY, "*150 *TransBlack " . NotificationImage)) {
-                    FileAppend("NOTIFICATION FOUND at " foundX "," foundY " - clicking...`n", logFile)
+                    Log("NOTIFICATION FOUND at " foundX "," foundY " - clicking...")
 
                     LastDetectionTime := CurrentTime
 
                     ; Click the notification
                     Click(foundX, foundY)
 
-                    FileAppend("Clicked notification`n", logFile)
+                    Log("Clicked notification")
                     Sleep(500)
 
                     ; Wait for Phone Link to open
@@ -79,9 +88,9 @@ loop {
                     ; Publish phone number via EnvSet (primary method)
                     try {
                         EnvSet("AUTO_PICKUP_PHONE", PHONE_NUMBER)
-                        FileAppend("Step 1: Set AUTO_PICKUP_PHONE env var`n", logFile)
+                        Log("Step 1: Set AUTO_PICKUP_PHONE env var")
                     } catch as e {
-                        FileAppend("Step 1: EnvSet failed: " e.Message "`n", logFile)
+                        Log("Step 1: EnvSet failed: " e.Message)
                     }
 
                     ; Fallback: write to temp file
@@ -89,25 +98,25 @@ loop {
                         if (FileExist(tempPhoneFile))
                             FileDelete(tempPhoneFile)
                         FileAppend(PHONE_NUMBER, tempPhoneFile)
-                        FileAppend("Step 1: Wrote phone to temp file: " PHONE_NUMBER "`n", logFile)
+                        Log("Step 1: Wrote phone to temp file: " PHONE_NUMBER)
                     } catch as e {
-                        FileAppend("Step 1: Temp file write failed: " e.Message "`n", logFile)
+                        Log("Step 1: Temp file write failed: " e.Message)
                     }
 
                     ; SUCCESS - Exit with code 0 so orchestrator's RunWait returns
-                    FileAppend("Step 1: Done, exiting with success`n`n", logFile)
+                    Log("Step 1: Done, exiting with success")
                     ExitApp(0)
                 } else if (DEBUG_MODE) {
-                    FileAppend(".", logFile)  ; Dot per scan for activity indicator
+                    Log(".")  ; Dot per scan for activity indicator
                 }
                 ; sleep for a bit to slow down CPU usage
                 Sleep(2000)
             }
         } else {
-            FileAppend("WARNING: Notification image not found: " NotificationImage "`n", logFile)
+            Log("WARNING: Notification image not found: " NotificationImage)
         }
     } catch Error as e {
-        FileAppend("Error: " e.Message "`n", logFile)
+        Log("Error: " e.Message)
     }
     Sleep(500)  ; Check twice per second
 }

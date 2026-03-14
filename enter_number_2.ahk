@@ -10,39 +10,49 @@ SetTitleMatchMode(2)
 logFile := "call-on-sms.log"
 tempPhoneFile := A_ScriptDir "\call-on-sms-phone.tmp"
 
-FileAppend("Step 2 at " A_Now "`n", logFile)
+Timestamp() {
+    months := ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    return months[A_Mon] " " A_MDay ", " A_Hour ":" A_Min ":" A_Sec
+}
+
+Log(msg) {
+    global logFile
+    FileAppend("[" Timestamp() "] " msg "`n", logFile)
+}
+
+Log("Step 2 starting")
 
 ; Get phone number from CLI argument (primary method) or temp file (fallback)
 phone := ""
 if (A_Args.Length > 0 && A_Args[1] != "") {
     phone := A_Args[1]
-    FileAppend("Step 2: got phone from CLI arg: " phone "`n", logFile)
+    Log("Step 2: got phone from CLI arg: " phone)
 } else if (FileExist(tempPhoneFile)) {
     phone := Trim(FileRead(tempPhoneFile))
-    FileAppend("Step 2: got phone from temp file: " phone "`n", logFile)
+    Log("Step 2: got phone from temp file: " phone)
 } else {
-    FileAppend("Step 2: no phone number (no CLI arg and no temp file)`n", logFile)
+    Log("Step 2: no phone number (no CLI arg and no temp file)")
     ExitApp(1)
 }
 
 if (phone = "") {
-    FileAppend("Step 2: empty phone number`n", logFile)
+    Log("Step 2: empty phone number")
     ExitApp(1)
 }
 
 if (!WinExist("Phone Link")) {
-    FileAppend("Step 2: Phone Link not found, launching...`n", logFile)
+    Log("Step 2: Phone Link not found, launching...")
     Run("ms-phone://")
     ; Wait for Phone Link to open (max 10 seconds)
     Loop 100 {
         if (WinExist("Phone Link")) {
-            FileAppend("Step 2: Phone Link launched`n", logFile)
+            Log("Step 2: Phone Link launched")
             break
         }
         Sleep(100)
     }
     if (!WinExist("Phone Link")) {
-        FileAppend("Step 2: Phone Link failed to launch`n", logFile)
+        Log("Step 2: Phone Link failed to launch")
         ExitApp(1)
     }
     Sleep(1000)  ; Give it extra time to fully load
@@ -65,7 +75,7 @@ CoordMode("Mouse", "Screen")
 callButtonImage := A_ScriptDir "\assets\call_button.png"
 
 if (FileExist(callButtonImage)) {
-    FileAppend("Step 2: searching for call button image...`n", logFile)
+    Log("Step 2: searching for call button image...")
     ; Call button image is 90x90, click center
     BUTTON_OFFSET_X := 45
     BUTTON_OFFSET_Y := 45
@@ -75,19 +85,19 @@ if (FileExist(callButtonImage)) {
 
     ; Search within Phone Link window only
     if (ImageSearch(&gx, &gy, winX, winY, winX + winW - 1, winY + winH - 1, "*30 " . callButtonImage)) {
-        FileAppend("Step 2: found call button at " gx "," gy " - clicking`n", logFile)
+        Log("Step 2: found call button at " gx "," gy " - clicking")
         ; click the center of the call button
         Click(gx + BUTTON_OFFSET_X, gy + BUTTON_OFFSET_Y)
         Sleep(200)
-        FileAppend("Step 2: clicked call button`n", logFile)
+        Log("Step 2: clicked call button")
     } else {
-        FileAppend("Step 2: call button image not found, falling back to Enter`n", logFile)
+        Log("Step 2: call button image not found, falling back to Enter")
         Send("{Enter}")
     }
 } else {
-    FileAppend("Step 2: call button image not found at " callButtonImage ", using Enter`n", logFile)
+    Log("Step 2: call button image not found at " callButtonImage ", using Enter")
     Send("{Enter}")
 }
 
-FileAppend("Step 2: done`n", logFile)
+Log("Step 2: done")
 ExitApp(0)
