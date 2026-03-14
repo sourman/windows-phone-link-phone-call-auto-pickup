@@ -14,7 +14,7 @@ SetWinDelay(0)
 ; Create or overwrite log file
 logFile := "call-on-sms.log"
 tempPhoneFile := A_ScriptDir "\call-on-sms-phone.tmp"
-PHONE_NUMBER := "+16479163598"  ; TODO: Extract via OCR instead of hardcoded
+PHONE_NUMBER := "01280043725"  ; TODO: Extract via OCR instead of hardcoded
 
 FileAppend("Step 1 starting at " A_Now "`n", logFile)
 
@@ -75,6 +75,8 @@ loop {
 
                     ; Wait for Phone Link to open
                     Sleep(1500)
+
+                    ; TODO, Detect the phone number that sent the SMS using OCR
 
                     ; Publish phone number via EnvSet (primary method)
                     try {
