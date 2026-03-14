@@ -28,11 +28,6 @@ CoordMode("Mouse", "Screen")
 ; Template image for notification detection (grayscale for color-insensitive shape matching)
 NotificationImage := A_ScriptDir "\assets\notification-teneen-gray.png"
 
-; Set up hotkeys for manual control
-#p:: Pause()
-#s:: Suspend()
-
-
 ; Track last detection to avoid spam clicking
 LastDetectionTime := 0
 DEBOUNCE_MS := 3000  ; Wait 3 seconds between detections
