@@ -13,14 +13,12 @@ tempPhoneFile := A_ScriptDir "\call-on-sms-phone.tmp"
 step1Script := A_ScriptDir "\click_notification_1.ahk"
 step2Script := A_ScriptDir "\enter_number_2.ahk"
 
-FileAppend("Mama starting at " A_Now "`n`n", logFile)
+FileAppend("Orchestrator starting at " A_Now "`n`n", logFile)
 
 SetTitleMatchMode(2)
 
 #p:: Pause()
 #s:: Suspend()
-
-TrayTip("Call on SMS", "Orchestrator running - waiting for step 1 to find notification...", 2)
 
 ; Main loop - simple orchestrator
 loop {

@@ -25,14 +25,13 @@ SetTitleMatchMode(2)
 CoordMode("Pixel", "Screen")
 CoordMode("Mouse", "Screen")
 
-; Template image for notification detection
-NotificationImage := A_ScriptDir "\assets\notification-teneen.png"
+; Template image for notification detection (grayscale for color-insensitive shape matching)
+NotificationImage := A_ScriptDir "\assets\notification-teneen-gray.png"
 
 ; Set up hotkeys for manual control
 #p:: Pause()
 #s:: Suspend()
 
-TrayTip("Notification Clicker", "Script Started - Monitoring for notifications...", 2)
 
 ; Track last detection to avoid spam clicking
 LastDetectionTime := 0
@@ -48,15 +47,20 @@ loop {
                 monW := A_ScreenWidth
                 monH := A_ScreenHeight
 
-                ; Start from right side, bottom 20% of screen
-                startX := Floor(monW * 0.5)
-                startY := Floor(monH * 0.8)
+                ; Start from right side, bottom 30% of screen
+                startX := Floor(monW * 0.7)
+                startY := Floor(monH * 0.7)
 
                 FileAppend("Searching region: (" startX "," startY ") to (" monW "," monH ")`n", logFile)
 
-                ; ImageSearch with 80% similarity tolerance (*80)
-                ; Lower tolerance = more strict, Higher = more lenient
-                if (ImageSearch(&foundX, &foundY, startX, startY, monW - 1, monH - 1, "*80 " . NotificationImage)) {
+                ; ImageSearch options for shape/color-insensitive matching:
+                ; *150 - shades of variation (0-255). Higher = more color tolerant
+                ;        150 allows moderate color variation while maintaining shape matching
+                ; *TransBlack - makes black pixels match any color (handles anti-aliasing/edges)
+                ;
+                ; Notes: *255 would match ALL colors (shape-only), but increases false positives
+                ;        150 is a good balance for notifications that may vary by theme/light-dark mode
+                if (ImageSearch(&foundX, &foundY, startX, startY, monW - 1, monH - 1, "*150 *TransBlack " . NotificationImage)) {
                     FileAppend("NOTIFICATION FOUND at " foundX "," foundY " - clicking...`n", logFile)
 
                     LastDetectionTime := CurrentTime
