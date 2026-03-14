@@ -43,15 +43,17 @@ loop {
             CurrentTime := A_TickCount
             if ((CurrentTime - LastDetectionTime) > DEBOUNCE_MS) {
 
-                ; Search region: bottom-right quadrant of screen
+                ; Search region: focused rectangle in bottom-right corner
                 monW := A_ScreenWidth
                 monH := A_ScreenHeight
 
-                ; Start from right side, bottom 30% of screen
-                startX := Floor(monW * 0.7)
-                startY := Floor(monH * 0.7)
+                ; Constrained search rectangle (10% × 10% in bottom-right)
+                startX := Floor(monW * 0.805)  ; 80.5%
+                startY := Floor(monH * 0.773)  ; 77.3%
+                endX   := Floor(monW * 0.905)  ; 90.5%
+                endY   := Floor(monH * 0.875)  ; 87.5%
 
-                FileAppend("Searching region: (" startX "," startY ") to (" monW "," monH ")`n", logFile)
+                FileAppend("Searching region: (" startX "," startY ") to (" endX "," endY ")`n", logFile)
 
                 ; ImageSearch options for shape/color-insensitive matching:
                 ; *150 - shades of variation (0-255). Higher = more color tolerant
@@ -60,7 +62,7 @@ loop {
                 ;
                 ; Notes: *255 would match ALL colors (shape-only), but increases false positives
                 ;        150 is a good balance for notifications that may vary by theme/light-dark mode
-                if (ImageSearch(&foundX, &foundY, startX, startY, monW - 1, monH - 1, "*150 *TransBlack " . NotificationImage)) {
+                if (ImageSearch(&foundX, &foundY, startX, startY, endX, endY, "*150 *TransBlack " . NotificationImage)) {
                     FileAppend("NOTIFICATION FOUND at " foundX "," foundY " - clicking...`n", logFile)
 
                     LastDetectionTime := CurrentTime
@@ -98,6 +100,8 @@ loop {
                 } else {
                     FileAppend(".", logFile)  ; Dot per scan for activity indicator
                 }
+                ; sleep for a bit to slow down CPU usage
+                Sleep(2000)
             }
         } else {
             FileAppend("WARNING: Notification image not found: " NotificationImage "`n", logFile)

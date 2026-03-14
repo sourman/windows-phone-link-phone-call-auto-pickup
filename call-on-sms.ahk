@@ -54,7 +54,7 @@ loop {
             }
 
             ; Debounce - wait before starting next cycle
-            Sleep(8000)
+            Sleep(120000) ; 2 minutes between calls
         } else {
             FileAppend("Orchestrator: Step 1 failed/timeout (exit code " exitCode "), retrying...`n", logFile)
             Sleep(1000)

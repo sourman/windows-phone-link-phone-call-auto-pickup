@@ -55,6 +55,10 @@ Sleep(500)
 Send(phone)
 Sleep(500)
 
+; Scroll down to make the call button visible at bottom of window
+Send("{PgDn}")
+Sleep(300)
+
 ; Image search for the call button
 CoordMode("Pixel", "Screen")
 CoordMode("Mouse", "Screen")
@@ -66,8 +70,11 @@ if (FileExist(callButtonImage)) {
     BUTTON_OFFSET_X := 45
     BUTTON_OFFSET_Y := 45
 
-    ; Search entire screen for call button
-    if (ImageSearch(&gx, &gy, 0, 0, A_ScreenWidth - 1, A_ScreenHeight - 1, "*30 " . callButtonImage)) {
+    ; Get active window bounds to confine search
+    WinGetPos(&winX, &winY, &winW, &winH, "Phone Link")
+
+    ; Search within Phone Link window only
+    if (ImageSearch(&gx, &gy, winX, winY, winX + winW - 1, winY + winH - 1, "*30 " . callButtonImage)) {
         FileAppend("Step 2: found call button at " gx "," gy " - clicking`n", logFile)
         ; click the center of the call button
         Click(gx + BUTTON_OFFSET_X, gy + BUTTON_OFFSET_Y)
