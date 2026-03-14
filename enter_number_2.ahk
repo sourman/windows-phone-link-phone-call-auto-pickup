@@ -65,31 +65,42 @@ Sleep(500)
 Send(phone)
 Sleep(500)
 
-; Scroll down to make the call button visible at bottom of window
-Send("{PgDn}")
+; Move mouse into Phone Link window and scroll down
+WinGetPos(&wx, &wy, &ww, &wh, "Phone Link")
+MouseMove(wx + ww // 2, wy + wh // 2)
+Loop 5
+    Click("WheelDown")
 Sleep(300)
 
 ; Image search for the call button
 CoordMode("Pixel", "Screen")
 CoordMode("Mouse", "Screen")
-callButtonImage := A_ScriptDir "\assets\call_button.png"
+; Call button template (grayscale for color-insensitive shape matching)
+callButtonImage := A_ScriptDir "\assets\call_button-gray.png"
 
 if (FileExist(callButtonImage)) {
     Log("Step 2: searching for call button image...")
-    ; Call button image is 90x90, click center
-    BUTTON_OFFSET_X := 45
-    BUTTON_OFFSET_Y := 45
+    ; Call button image is 80x70, click center
+    BUTTON_OFFSET_X := 40
+    BUTTON_OFFSET_Y := 35
 
     ; Get active window bounds to confine search
     WinGetPos(&winX, &winY, &winW, &winH, "Phone Link")
 
     ; Search within Phone Link window only
-    if (ImageSearch(&gx, &gy, winX, winY, winX + winW - 1, winY + winH - 1, "*30 " . callButtonImage)) {
+    ; ImageSearch options: *50 for moderate color variation (stricter matching to avoid false positives)
+    ; Removed *TransBlack to require exact shape matching (no transparency on edges)
+    if (ImageSearch(&gx, &gy, winX, winY, winX + winW - 1, winY + winH - 1, "*70 " . callButtonImage)) {
         Log("Step 2: found call button at " gx "," gy " - clicking")
         ; click the center of the call button
         Click(gx + BUTTON_OFFSET_X, gy + BUTTON_OFFSET_Y)
         Sleep(200)
         Log("Step 2: clicked call button")
+
+        ; Close Phone Link window
+        WinClose("Phone Link")
+        WinWaitClose("Phone Link", , 5)
+
     } else {
         Log("Step 2: call button image not found, falling back to Enter")
         Send("{Enter}")
