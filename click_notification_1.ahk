@@ -36,7 +36,7 @@ CoordMode("Pixel", "Screen")
 CoordMode("Mouse", "Screen")
 
 ; Template image for notification detection (grayscale for color-insensitive shape matching)
-NotificationImage := A_ScriptDir "\assets\notification-teneen-gray.png"
+NotificationImage := A_ScriptDir "\assets\TENEEN.png"
 
 ; Track last detection to avoid spam clicking
 LastDetectionTime := 0
@@ -53,10 +53,10 @@ loop {
                 monH := A_ScreenHeight
 
                 ; Constrained search rectangle (10% × 10% in bottom-right)
-                startX := Floor(monW * 0.805)  ; 80.5%
-                startY := Floor(monH * 0.773)  ; 77.3%
-                endX   := Floor(monW * 0.905)  ; 90.5%
-                endY   := Floor(monH * 0.875)  ; 87.5%
+                startX := Floor(monW * 0.78)  ; 80.5%
+                startY := Floor(monH * 0.75)  ; 77.3%
+                endX   := startX + 200
+                endY   := startY + 100
 
                 if (DEBUG_MODE) {
                     Log("Step 1: Searching region: (" startX "," startY ") to (" endX "," endY ")")
@@ -69,7 +69,7 @@ loop {
                 ;
                 ; Notes: *255 would match ALL colors (shape-only), but increases false positives
                 ;        150 is a good balance for notifications that may vary by theme/light-dark mode
-                if (ImageSearch(&foundX, &foundY, startX, startY, endX, endY, "*150 *TransBlack " . NotificationImage)) {
+                if (ImageSearch(&foundX, &foundY, startX, startY, endX, endY,  NotificationImage)) {
                     Log("NOTIFICATION FOUND at " foundX "," foundY " - clicking...")
 
                     LastDetectionTime := CurrentTime
