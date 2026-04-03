@@ -1,3 +1,4 @@
 *.log
 *.tmp
 call-on-sms-number.txt
+**/*__pycache__
