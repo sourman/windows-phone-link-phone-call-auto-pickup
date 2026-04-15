@@ -28,6 +28,20 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
     level=logging.INFO,
 )
+
+
+class _TokenRedactingFormatter(logging.Formatter):
+    """Formatter that replaces the bot token in the final rendered log line."""
+
+    def __init__(self, token: str, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self._token = token
+
+    def format(self, record: logging.LogRecord) -> str:
+        text = super().format(record)
+        return text.replace(self._token, "***")
+
+
 log = logging.getLogger("comet_listener")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -124,6 +138,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     is_comet, phone = parse_comet_text(msg.text)
     if not is_comet:
+        log.info("Message received (not COMET): %s", msg.text[:40])
         return
     if not phone:
         log.error(
@@ -163,6 +178,13 @@ def main() -> None:
             "TELEGRAM_ALLOWED_USER_IDS is unset — any user who messages your bot can trigger COMET. "
             "Set it to your numeric user id (from @userinfobot or similar)."
         )
+
+    # Redact the token from ALL log output (httpx, telegram, etc.) at every level.
+    redacting_fmt = _TokenRedactingFormatter(
+        token, "%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
+    for handler in logging.root.handlers:
+        handler.setFormatter(redacting_fmt)
 
     app = Application.builder().token(token).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

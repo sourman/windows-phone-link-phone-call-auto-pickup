@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(winget list:*)",
+      "Bash(where vim:*)",
+      "Bash(echo:*)",
+      "Bash(powershell.exe:*)"
+    ]
+  }
+}
