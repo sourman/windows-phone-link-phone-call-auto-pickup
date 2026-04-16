@@ -2,3 +2,5 @@
 *.tmp
 call-on-sms-number.txt
 **/*__pycache__
+**/*.env.**
+**/*.venv
