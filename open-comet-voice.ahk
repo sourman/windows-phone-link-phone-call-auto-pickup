@@ -16,7 +16,13 @@ Log(msg) {
     FileAppend("[" Timestamp() "] " msg "`n", logFile)
 }
 
-Log("Step 3 starting")
+; Optional: target URL passed as first argument (by watcher.py)
+targetUrl := ""
+if (A_Args.Length >= 1) {
+    targetUrl := A_Args[1]
+}
+
+Log("Step 3 starting" . (targetUrl ? " — target URL: " . targetUrl : " — no target URL"))
 
 ; Close all existing Comet windows
 existing := WinGetList("ahk_exe comet.exe")
@@ -43,8 +49,9 @@ if (existing.Length > 0) {
 ; Launch first Comet window
 LocalAppData := EnvGet("LOCALAPPDATA")
 cometPath := LocalAppData "\Perplexity\Comet\Application\comet.exe"
+cometCmd := '"' cometPath '"'
 try {
-    Run('"' cometPath '"')
+    Run(cometCmd)
 } catch Error as e {
     Log("Failed to start first Comet: " e.Message)
     ExitApp
@@ -71,10 +78,10 @@ Sleep(5000)
 beforeSecondLaunch := WinGetList("ahk_exe comet.exe")
 Log("Windows before second launch: " beforeSecondLaunch.Length)
 
-; Launch second Comet window
+; Launch second Comet window (no URL — needed for two-window trick)
 Log("Attempting to launch second Comet window...")
 try {
-    Run('"' cometPath '"')
+    Run(cometCmd)
     Log("Second Comet Run() executed successfully")
 } catch Error as e {
     Log("Failed to start second Comet: " e.Message)
@@ -137,8 +144,20 @@ if !WinWaitActive("ahk_id " secondHwnd, , 10) {
     ExitApp
 }
 
-; Send Alt+Shift+V to enable comet voice mode
-Send("!+v")
+; Navigate to target URL via address bar before activating voice mode
+if (targetUrl) {
+    Sleep(500)
+    Log("Navigating to target URL via address bar: " targetUrl)
+    Send("^l")              ; Ctrl+L to focus address bar
+    Sleep(300)
+    Send(targetUrl)         ; Type the URL
+    Sleep(100)
+    Send("{Enter}")         ; Navigate
+    Sleep(2000)             ; Wait for page to start loading
+}
 
+; Send Alt+Shift+V to enable comet voice mode
+Log("Activating voice mode")
+Send("!+v")
 
 ExitApp

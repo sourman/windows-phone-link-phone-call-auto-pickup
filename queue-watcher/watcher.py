@@ -40,6 +40,7 @@ STEP2_SCRIPT = REPO_ROOT / "enter_number_2.ahk"
 STEP3_SCRIPT = REPO_ROOT / "open-comet-voice.ahk"
 LOG_FILE = Path(__file__).resolve().parent / "queue-watcher.log"
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env.local"
+TARGET_URL_FILE = REPO_ROOT / "target_url.txt"
 
 ACCOUNT_URL = "https://api.cloudflare.com/client/v4/accounts/{account_id}/queues/{queue_id}"
 PULL_URL = ACCOUNT_URL + "/messages/pull"
@@ -97,12 +98,27 @@ def find_autohotkey_v2_exe() -> Path | None:
     return None
 
 
-def run_call_then_comet(ahk_exe: Path, phone: str) -> tuple[int, int]:
+def read_target_url() -> str | None:
+    """Read the target URL from target_url.txt. Returns None if file is missing or empty."""
+    if not TARGET_URL_FILE.exists():
+        log.warning("target_url.txt not found at %s — Comet will open blank", TARGET_URL_FILE)
+        return None
+    url = TARGET_URL_FILE.read_text().strip()
+    if not url:
+        log.warning("target_url.txt is empty — Comet will open blank")
+        return None
+    return url
+
+
+def run_call_then_comet(ahk_exe: Path, phone: str, target_url: str | None) -> tuple[int, int]:
     # AHK exe launched via WSL path (Python resolves it), script args as Windows paths (AHK reads them)
     s2 = to_win_path(STEP2_SCRIPT)
     s3 = to_win_path(STEP3_SCRIPT)
     r2 = subprocess.run([str(ahk_exe), s2, phone])
-    r3 = subprocess.run([str(ahk_exe), s3])
+    s3_args = [str(ahk_exe), s3]
+    if target_url:
+        s3_args.append(target_url)
+    r3 = subprocess.run(s3_args)
     return r2.returncode, r3.returncode
 
 
@@ -265,6 +281,12 @@ def main() -> None:
 
     log.info("Queue watcher started — polling every %ds", POLL_INTERVAL)
 
+    target_url = read_target_url()
+    if target_url:
+        log.info("Target URL: %s", target_url)
+    else:
+        log.info("No target URL configured — Comet will open blank")
+
     retry_count = [0]
     while True:
         try:
@@ -297,7 +319,7 @@ def main() -> None:
                 if not ahk_exe:
                     log.warning("AHK not available — skipping call + comet execution")
                 else:
-                    rc2, rc3 = run_call_then_comet(ahk_exe, phone)
+                    rc2, rc3 = run_call_then_comet(ahk_exe, phone, target_url)
                     log.info("enter_number_2 exit=%d open-comet-voice exit=%d", rc2, rc3)
 
             ack_messages(account_id, queue_id, api_token, ack_ids)
