@@ -151,7 +151,7 @@ if (targetUrl) {
     Send("^l")              ; Ctrl+L to focus address bar
     Sleep(300)
     Send(targetUrl)         ; Type the URL
-    Sleep(100)
+    Sleep(500)
     Send("{Enter}")         ; Navigate
     Sleep(2000)             ; Wait for page to start loading
 }

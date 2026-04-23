@@ -9,15 +9,11 @@ $taskName = "QueueWatcher-AutoPickup"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $watcherPy = Join-Path $scriptDir "watcher.py"
 
-# Find pythonw (no console window)
-$pythonw = Get-Command pythonw -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
-if (-not $pythonw) {
-    $pythonw = Get-Command python -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
-    if (-not $pythonw) {
-        Write-Error "python/pythonw not found on PATH"
-        exit 1
-    }
-    Write-Warning "pythonw not found, using python (will show a console window)"
+# Use the venv's pythonw (no console window, has dependencies installed)
+$pythonw = Join-Path $scriptDir "venv\Scripts\pythonw.exe"
+if (-not (Test-Path $pythonw)) {
+    Write-Error "venv pythonw not found at $pythonw. Run:  python -m venv venv;  venv\Scripts\pip install -r requirements.txt"
+    exit 1
 }
 
 # Remove existing task if present
@@ -37,7 +33,7 @@ Register-ScheduledTask `
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `
-    -Description "Auto-pickup queue watcher — polls Cloudflare Queue for COMET SMS" `
+    -Description "Auto-pickup queue watcher - polls Cloudflare Queue for COMET SMS" `
     | Out-Null
 
 Write-Host "Registered scheduled task '$taskName' for user $env:USERNAME"
@@ -46,4 +42,5 @@ Write-Host "  Script     : $watcherPy"
 Write-Host ""
 Write-Host "To start now  : schtasks /Run /TN `"$taskName`""
 Write-Host "To stop       : schtasks /End /TN `"$taskName`""
-Write-Host "To unregister : Unregister-ScheduledTask -TaskName `"$taskName`""
+$unreg = 'Unregister-ScheduledTask -TaskName "' + $taskName + '"'
+Write-Host "To unregister : $unreg"
