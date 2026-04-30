@@ -62,6 +62,9 @@ logging.root.addHandler(file_handler)
 
 log = logging.getLogger("telegram_watcher")
 
+# Silence noisy httpx polling logs (every getUpdates request)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 class _TokenRedactingFormatter(logging.Formatter):
     """Formatter that replaces the bot token in the final rendered log line."""
