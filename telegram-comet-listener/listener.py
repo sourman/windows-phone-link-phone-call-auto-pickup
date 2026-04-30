@@ -224,7 +224,11 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
     log.info("Telegram watcher started — polling COMET -> %s then %s", STEP2_SCRIPT.name, STEP3_SCRIPT.name)
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    except Exception:
+        log.exception("run_polling crashed, exiting")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
