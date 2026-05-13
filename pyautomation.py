@@ -278,6 +278,7 @@ def open_comet_voice(target_url: str | None = None) -> bool:
     time.sleep(0.05)
     pyautogui.keyUp("alt")
     log.info("Voice mode keystroke sent")
+    time.sleep(3)  # wait for voice mode to fully activate before next step steals focus
 
     log.info("open_comet_voice done")
     return True
