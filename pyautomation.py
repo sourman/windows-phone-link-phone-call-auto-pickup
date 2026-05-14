@@ -136,12 +136,19 @@ def _activate_window(hwnd: int, timeout: float = 10.0) -> bool:
     if not HAS_WIN32:
         return False
     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    win32gui.SetForegroundWindow(hwnd)
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception as e:
+        log.warning("SetForegroundWindow failed (%s), trying Alt+Tab fallback", e)
+        import pyautogui as _pag
+        _pag.hotkey("alt", "tab")
+        time.sleep(0.5)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if win32gui.GetForegroundWindow() == hwnd:
             return True
         time.sleep(0.1)
+    log.warning("Window hwnd=%s did not become foreground within %.1fs", hwnd, timeout)
     return False
 
 
@@ -239,10 +246,11 @@ def open_comet_voice(target_url: str | None = None) -> bool:
     time.sleep(0.5)
 
     # Activate the second window
-    if not _activate_window(second_hwnd):
-        log.error("Second Comet window did not become active")
-        return False
-    log.info("Activated second window (hwnd=%s)", second_hwnd)
+    activated = _activate_window(second_hwnd)
+    if not activated:
+        log.warning("Second Comet window activation uncertain — continuing anyway")
+    else:
+        log.info("Activated second window (hwnd=%s)", second_hwnd)
 
     # --- Navigate to target URL ---
     if target_url:
