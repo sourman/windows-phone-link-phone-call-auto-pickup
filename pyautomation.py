@@ -44,7 +44,7 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parent
 LOG_FILE = REPO_ROOT / "pyautomation.log"
 ASSETS_DIR = REPO_ROOT / "assets"
-CALL_BUTTON_IMAGE = ASSETS_DIR / "call_button-gray.png"
+CALL_BUTTON_IMAGE = ASSETS_DIR / "call_button-green-tight.png"
 TARGET_URL_FILE = REPO_ROOT / "target_url.txt"
 SCREENSHOT_DIR = REPO_ROOT / "screenshots"
 
@@ -362,12 +362,12 @@ def enter_number(phone: str) -> bool:
                 region=(rect.left, rect.top, rect.width, rect.height)
             )
 
-            # Search with confidence threshold matching AHK's *70 variation
+            # Search with confidence threshold — green template matches well
             matches = list(
                 pyautogui.locateAll(
                     str(CALL_BUTTON_IMAGE),
                     screenshot,
-                    confidence=0.7,
+                    confidence=0.8,
                 )
             )
 
