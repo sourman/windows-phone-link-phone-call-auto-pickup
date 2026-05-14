@@ -21,7 +21,6 @@ import os
 import subprocess
 import sys
 import time
-import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -85,72 +84,6 @@ def _save_screenshot(label: str, region: tuple[int, int, int, int] | None = None
     img.save(str(path))
     log.info("Screenshot saved: %s", path.name)
     return path
-
-
-# ---------------------------------------------------------------------------
-# Visual click indicator — shows a fading red circle at click position
-# ---------------------------------------------------------------------------
-
-def _flash_click(x: int, y: int, radius: int = 30, duration: float = 0.6) -> None:
-    """Show a brief red circle overlay at (x, y) then fade out. Non-blocking."""
-    if not HAS_WIN32:
-        return
-
-    def _worker():
-        try:
-            import ctypes
-            from ctypes import windll, byref, c_int, sizeof
-
-            # Create a transparent, click-through, topmost popup window
-            hwnd = win32gui.CreateWindowEx(
-                win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOPMOST | win32con.WS_EX_TOOLWINDOW,
-                "Static",
-                "",
-                win32con.WS_POPUP,
-                x - radius, y - radius, radius * 2, radius * 2,
-                0, 0, 0, None
-            )
-            if not hwnd:
-                return
-
-            # Make it a layered window with transparency
-            # Draw a red circle using a bitmap
-            import win32ui
-            import win32api
-
-            hdc = win32gui.GetDC(hwnd)
-            pen = win32gui.CreatePen(win32con.PS_SOLID, 3, win32api.RGB(255, 50, 50))
-            brush = win32gui.CreateSolidBrush(win32api.RGB(255, 50, 50))
-            old_pen = win32gui.SelectObject(hdc, pen)
-            old_brush = win32gui.SelectObject(hdc, brush)
-
-            # Show with initial alpha
-            win32gui.SetLayeredWindowAttributes(hwnd, 0, 200, win32con.LWA_ALPHA)
-            win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
-
-            # Draw filled ellipse
-            rect = (0, 0, radius * 2, radius * 2)
-            win32gui.Ellipse(hdc, rect[0], rect[1], rect[2], rect[3])
-
-            win32gui.SelectObject(hdc, old_pen)
-            win32gui.SelectObject(hdc, old_brush)
-            win32gui.DeleteObject(pen)
-            win32gui.DeleteObject(brush)
-            win32gui.ReleaseDC(hwnd, hdc)
-
-            # Fade out
-            steps = 10
-            for i in range(steps):
-                alpha = int(200 * (1 - i / steps))
-                win32gui.SetLayeredWindowAttributes(hwnd, 0, max(alpha, 0), win32con.LWA_ALPHA)
-                time.sleep(duration / steps)
-
-            win32gui.DestroyWindow(hwnd)
-        except Exception:
-            pass  # visual indicator is best-effort
-
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
 
 
 # ---------------------------------------------------------------------------
