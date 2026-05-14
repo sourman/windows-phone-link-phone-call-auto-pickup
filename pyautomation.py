@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import time
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -44,7 +45,6 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parent
 LOG_FILE = REPO_ROOT / "pyautomation.log"
 ASSETS_DIR = REPO_ROOT / "assets"
-CALL_BUTTON_IMAGE = ASSETS_DIR / "call_button-green-tight.png"
 TARGET_URL_FILE = REPO_ROOT / "target_url.txt"
 SCREENSHOT_DIR = REPO_ROOT / "screenshots"
 
@@ -85,6 +85,72 @@ def _save_screenshot(label: str, region: tuple[int, int, int, int] | None = None
     img.save(str(path))
     log.info("Screenshot saved: %s", path.name)
     return path
+
+
+# ---------------------------------------------------------------------------
+# Visual click indicator — shows a fading red circle at click position
+# ---------------------------------------------------------------------------
+
+def _flash_click(x: int, y: int, radius: int = 30, duration: float = 0.6) -> None:
+    """Show a brief red circle overlay at (x, y) then fade out. Non-blocking."""
+    if not HAS_WIN32:
+        return
+
+    def _worker():
+        try:
+            import ctypes
+            from ctypes import windll, byref, c_int, sizeof
+
+            # Create a transparent, click-through, topmost popup window
+            hwnd = win32gui.CreateWindowEx(
+                win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOPMOST | win32con.WS_EX_TOOLWINDOW,
+                "Static",
+                "",
+                win32con.WS_POPUP,
+                x - radius, y - radius, radius * 2, radius * 2,
+                0, 0, 0, None
+            )
+            if not hwnd:
+                return
+
+            # Make it a layered window with transparency
+            # Draw a red circle using a bitmap
+            import win32ui
+            import win32api
+
+            hdc = win32gui.GetDC(hwnd)
+            pen = win32gui.CreatePen(win32con.PS_SOLID, 3, win32api.RGB(255, 50, 50))
+            brush = win32gui.CreateSolidBrush(win32api.RGB(255, 50, 50))
+            old_pen = win32gui.SelectObject(hdc, pen)
+            old_brush = win32gui.SelectObject(hdc, brush)
+
+            # Show with initial alpha
+            win32gui.SetLayeredWindowAttributes(hwnd, 0, 200, win32con.LWA_ALPHA)
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
+
+            # Draw filled ellipse
+            rect = (0, 0, radius * 2, radius * 2)
+            win32gui.Ellipse(hdc, rect[0], rect[1], rect[2], rect[3])
+
+            win32gui.SelectObject(hdc, old_pen)
+            win32gui.SelectObject(hdc, old_brush)
+            win32gui.DeleteObject(pen)
+            win32gui.DeleteObject(brush)
+            win32gui.ReleaseDC(hwnd, hdc)
+
+            # Fade out
+            steps = 10
+            for i in range(steps):
+                alpha = int(200 * (1 - i / steps))
+                win32gui.SetLayeredWindowAttributes(hwnd, 0, max(alpha, 0), win32con.LWA_ALPHA)
+                time.sleep(duration / steps)
+
+            win32gui.DestroyWindow(hwnd)
+        except Exception:
+            pass  # visual indicator is best-effort
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
 
 
 # ---------------------------------------------------------------------------
@@ -136,13 +202,7 @@ def _activate_window(hwnd: int, timeout: float = 10.0) -> bool:
     if not HAS_WIN32:
         return False
     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    try:
-        win32gui.SetForegroundWindow(hwnd)
-    except Exception as e:
-        log.warning("SetForegroundWindow failed (%s), trying Alt+Tab fallback", e)
-        import pyautogui as _pag
-        _pag.hotkey("alt", "tab")
-        time.sleep(0.5)
+    win32gui.SetForegroundWindow(hwnd)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if win32gui.GetForegroundWindow() == hwnd:
@@ -299,8 +359,8 @@ def open_comet_voice(target_url: str | None = None) -> bool:
 
 def enter_number(phone: str) -> bool:
     """
-    Open Phone Link, switch to Calls panel, enter *phone*, find and click
-    the call button (image search), then close Phone Link.
+    Open Phone Link, switch to Calls panel, enter *phone*, press Enter to call
+    (Phone Link auto-selects the call button after number entry), then close.
 
     Returns True on success.
     """
@@ -337,81 +397,18 @@ def enter_number(phone: str) -> bool:
     pl_win.activate()
     time.sleep(0.3)
     pyautogui.hotkey("ctrl", "3")
+    log.info("Switched to Calls panel (Ctrl+3)")
     time.sleep(0.5)
 
     # --- Type phone number ---
     pyautogui.typewrite(phone, interval=0.02)
+    log.info("Phone number typed: %s", phone)
+    time.sleep(0.2)  # brief wait for Phone Link to auto-select call button
+
+    # --- Press Enter to initiate call ---
+    pyautogui.press("enter")
+    log.info("Enter pressed — Phone Link auto-selects call button")
     time.sleep(0.5)
-
-    # --- Scroll down in Phone Link window ---
-    try:
-        rect = pl_win.box
-        center_x = rect.left + rect.width // 2
-        center_y = rect.top + rect.height // 2
-        pyautogui.moveTo(center_x, center_y)
-        for _ in range(5):
-            pyautogui.scroll(-1)  # negative = scroll down
-        time.sleep(0.3)
-    except Exception:
-        log.warning("Could not scroll in Phone Link window")
-
-    # --- Image search for call button ---
-    if CALL_BUTTON_IMAGE.is_file():
-        log.info("Searching for call button image...")
-        try:
-            pl_win.activate()
-            time.sleep(0.2)
-
-            # Screenshot: before click (full screen)
-            _save_screenshot("pre_call_button")
-
-            rect = pl_win.box
-            screenshot = pyautogui.screenshot(
-                region=(rect.left, rect.top, rect.width, rect.height)
-            )
-
-            # Search with confidence threshold — green template matches well
-            matches = list(
-                pyautogui.locateAll(
-                    str(CALL_BUTTON_IMAGE),
-                    screenshot,
-                    confidence=0.8,
-                )
-            )
-
-            if matches:
-                match = matches[0]
-                click_x = rect.left + match.left + match.width // 2
-                click_y = rect.top + match.top + match.height // 2
-                log.info("Found call button at (%d, %d) — clicking", click_x, click_y)
-
-                # Screenshot: 200x200 crop around the matched button
-                from PIL import Image
-                crop = screenshot.crop((
-                    max(0, match.left - 60),
-                    max(0, match.top - 60),
-                    match.left + match.width + 60,
-                    match.top + match.height + 60,
-                ))
-                crop_path = _screenshot_path("call_button_crop")
-                crop.save(str(crop_path))
-                log.info("Button crop saved: %s", crop_path.name)
-
-                pyautogui.click(click_x, click_y)
-                time.sleep(0.5)
-
-                # Screenshot: after click (full screen)
-                _save_screenshot("post_call_button")
-                log.info("Clicked call button")
-            else:
-                log.info("Call button image not found — falling back to Enter")
-                pyautogui.press("enter")
-        except Exception as e:
-            log.warning("Image search failed (%s) — falling back to Enter", e)
-            pyautogui.press("enter")
-    else:
-        log.info("Call button image not found at %s — using Enter", CALL_BUTTON_IMAGE)
-        pyautogui.press("enter")
 
     # --- Close Phone Link ---
     wins = gw.getWindowsWithTitle(PHONE_LINK_TITLE)
