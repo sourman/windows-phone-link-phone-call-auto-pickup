@@ -47,43 +47,27 @@ Log("Switching to Calls panel (Ctrl+3)")
 Send("^3")
 Sleep(1000)
 
-; Type the phone number
+; Click the search/number input field in the dialer (right panel)
+; Phone Link window is maximized: the dialer search box is at roughly
+; 85% of window width, 25% of window height
+WinGetPos(&wx, &wy, &ww, &wh, "Phone Link")
+searchX := wx + Round(ww * 0.85)
+searchY := wy + Round(wh * 0.25)
+Log("Clicking search field at " searchX "," searchY " (window " wx "," wy "," ww "," wh ")")
+Click(searchX, searchY)
+Sleep(500)
+
+; Clear any existing text and type the phone number
 Log("Typing phone number: " phone)
+Send("^a")
+Sleep(100)
 Send(phone)
 Sleep(500)
 
-; Move mouse into Phone Link window and scroll down
-WinGetPos(&wx, &wy, &ww, &wh, "Phone Link")
-MouseMove(wx + ww // 2, wy + wh // 2)
-Loop 5
-    Click("WheelDown")
-Sleep(300)
-
-; Image search for the call button
-CoordMode("Pixel", "Screen")
-CoordMode("Mouse", "Screen")
-callButtonImage := A_ScriptDir "\assets\call_button-gray.png"
-
-if (FileExist(callButtonImage)) {
-    Log("Searching for call button image...")
-    BUTTON_OFFSET_X := 40
-    BUTTON_OFFSET_Y := 35
-
-    WinGetPos(&winX, &winY, &winW, &winH, "Phone Link")
-
-    if (ImageSearch(&gx, &gy, winX, winY, winX + winW - 1, winY + winH - 1, "*70 " . callButtonImage)) {
-        Log("Found call button at " gx "," gy " - clicking")
-        Click(gx + BUTTON_OFFSET_X, gy + BUTTON_OFFSET_Y)
-        Sleep(200)
-        Log("Clicked call button")
-    } else {
-        Log("Call button image not found, falling back to Enter")
-        Send("{Enter}")
-    }
-} else {
-    Log("Call button image not found at " callButtonImage ", using Enter")
-    Send("{Enter}")
-}
+; Press Enter to initiate the call
+Log("Pressing Enter to call")
+Send("{Enter}")
+Sleep(500)
 
 Log("Done")
 ExitApp(0)
