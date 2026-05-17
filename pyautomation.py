@@ -45,13 +45,18 @@ logging.basicConfig(
 log = logging.info
 
 # ── Imports ─────────────────────────────────────────────────
-import uiautomation as auto
+# UIA is imported lazily to avoid CoInitialize issues with pythonw.exe
 import pyautogui
-import pyperclip
 import psutil
 
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.03
+
+
+def _ensure_uia():
+    """Lazy import UIA — only when actually needed for automation."""
+    import uiautomation as auto
+    return auto
 
 
 # ── Comet helpers ───────────────────────────────────────────
@@ -77,6 +82,7 @@ def launch_comet():
 
 def find_comet_window(timeout=10):
     """Find Comet window by class name."""
+    auto = _ensure_uia()
     deadline = time.time() + timeout
     while time.time() < deadline:
         for c in auto.GetRootControl().GetChildren():
@@ -113,6 +119,7 @@ def open_comet_voice(target_url: str | None = None) -> bool:
     time.sleep(3)
 
     # 4. Find and close the first Comet window, keep the second
+    auto = _ensure_uia()
     comet_windows = []
     for c in auto.GetRootControl().GetChildren():
         if c.ClassName == "Chrome_WidgetWin_1" and "comet" in (c.Name or "").lower():
@@ -146,6 +153,7 @@ def open_comet_voice(target_url: str | None = None) -> bool:
         log(f"Navigating to: {target_url}")
         pyautogui.hotkey("ctrl", "l")
         time.sleep(0.5)
+        import pyperclip
         pyperclip.copy(target_url)
         pyautogui.hotkey("ctrl", "v")
         time.sleep(0.3)
