@@ -1,9 +1,8 @@
 """
-Python (PyAutoGUI + pywin32) replacement for the AHK automation scripts.
+Auto-pickup — UIA-based Comet voice activation + AHK Phone Link calling.
 
-Replicates:
-  - open-comet-voice.ahk  →  open_comet_voice()
-  - enter_number_2.ahk    →  enter_number()
+Comet launching: UIA window discovery + keyboard shortcuts
+Phone Link calling: delegates to phone_call.ahk (proven reliable, same as telegram-call)
 
 Usage:
   python pyautomation.py comet [target_url]
@@ -11,9 +10,8 @@ Usage:
   python pyautomation.py both [target_url] [phone_number]
 
 Dependencies:
-  pip install pyautogui Pillow psutil pywin32 opencv-python
+  pip install uiautomation pyautogui pyperclip psutil
 """
-
 from __future__ import annotations
 
 import logging
@@ -21,344 +19,190 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
-import psutil
-import pyautogui
-import pygetwindow as gw
+sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', errors='replace', closefd=False)
+sys.stderr = open(sys.stderr.fileno(), mode='w', encoding='utf-8', errors='replace', closefd=False)
 
-try:
-    import win32con
-    import win32gui
-    import win32process
+SCRIPT_DIR = Path(__file__).resolve().parent
+LOG_FILE = SCRIPT_DIR / "pyautomation.log"
+TARGET_URL_FILE = SCRIPT_DIR / "target_url.txt"
 
-    HAS_WIN32 = True
-except ImportError:
-    HAS_WIN32 = False
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-REPO_ROOT = Path(__file__).resolve().parent
-LOG_FILE = REPO_ROOT / "pyautomation.log"
-ASSETS_DIR = REPO_ROOT / "assets"
-TARGET_URL_FILE = REPO_ROOT / "target_url.txt"
-SCREENSHOT_DIR = REPO_ROOT / "screenshots"
-
-COMET_EXE_NAME = "comet.exe"
-COMET_PATH = Path(os.environ.get("LOCALAPPDATA", "")) / "Perplexity" / "Comet" / "Application" / "comet.exe"
-PHONE_LINK_TITLE = "Phone Link"
-PHONE_LINK_URI = "ms-phone://"
-
+# ── Config ──────────────────────────────────────────────────
+COMET_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Perplexity" / "Comet" / "Application" / "comet.exe"
 HARDCODED_PHONE = "01280043725"
 
-pyautogui.PAUSE = 0.05  # small pause between actions
+# Phone Link calling via AHK (same proven script from telegram-call repo)
+AUTOHOTKEY_EXE = Path(os.environ.get("ProgramFiles", "")) / "AutoHotkey" / "v2" / "AutoHotkey64.exe"
+PHONE_CALL_AHK = SCRIPT_DIR / "phone_call.ahk"
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
+# ── Logging ─────────────────────────────────────────────────
+logging.basicConfig(
+    filename=str(LOG_FILE),
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+log = logging.info
 
-log = logging.getLogger("pyautomation")
+# ── Imports ─────────────────────────────────────────────────
+import uiautomation as auto
+import pyautogui
+import pyperclip
+import psutil
 
-
-def _setup_logging() -> None:
-    handler = logging.FileHandler(str(LOG_FILE), encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    logging.root.addHandler(handler)
-    logging.root.setLevel(logging.INFO)
-
-
-def _screenshot_path(label: str) -> Path:
-    """Return a timestamped screenshot path, creating the directory if needed."""
-    SCREENSHOT_DIR.mkdir(exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return SCREENSHOT_DIR / f"{ts}_{label}.png"
-
-
-def _save_screenshot(label: str, region: tuple[int, int, int, int] | None = None) -> Path:
-    """Take and save a screenshot (full screen or cropped region)."""
-    path = _screenshot_path(label)
-    img = pyautogui.screenshot(region=region) if region else pyautogui.screenshot()
-    img.save(str(path))
-    log.info("Screenshot saved: %s", path.name)
-    return path
+pyautogui.FAILSAFE = True
+pyautogui.PAUSE = 0.03
 
 
-# ---------------------------------------------------------------------------
-# Window helpers (Windows-specific via pywin32)
-# ---------------------------------------------------------------------------
+# ── Comet helpers ───────────────────────────────────────────
 
-
-def _find_windows_by_pid(pid: int) -> list[int]:
-    """Return top-level window handles owned by *pid*."""
-    if not HAS_WIN32:
-        return []
-    result: list[int] = []
-
-    def _cb(hwnd: int, _ctx: None) -> None:
-        _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
-        if found_pid == pid and win32gui.IsWindowVisible(hwnd):
-            result.append(hwnd)
-
-    win32gui.EnumWindows(_cb, None)
-    return result
-
-
-def _find_windows_by_exe(exe_name: str) -> list[tuple[int, int]]:
-    """Return [(hwnd, pid), ...] for all visible windows whose process matches *exe_name*."""
-    targets: list[tuple[int, int]] = []
-    exe_lower = exe_name.lower()
+def kill_comet():
+    """Kill all Comet processes."""
     for proc in psutil.process_iter(["pid", "name"]):
-        if (proc.info.get("name") or "").lower() == exe_lower:
-            for hwnd in _find_windows_by_pid(proc.info["pid"]):
-                targets.append((hwnd, proc.info["pid"]))
-    return targets
+        if (proc.info.get("name") or "").lower() == "comet.exe":
+            log(f"Killing Comet PID {proc.info['pid']}")
+            proc.kill()
+    time.sleep(1)
 
 
-def _close_window(hwnd: int, timeout: float = 5.0) -> bool:
-    """Send WM_CLOSE and wait for the window to disappear."""
-    if not HAS_WIN32:
+def launch_comet():
+    """Launch Comet browser."""
+    if not COMET_EXE.is_file():
+        log(f"Comet not found at {COMET_EXE}")
         return False
-    win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not win32gui.IsWindow(hwnd):
-            return True
-        time.sleep(0.1)
-    return False
+    subprocess.Popen([str(COMET_EXE)], cwd=str(COMET_EXE.parent))
+    log("Comet launched")
+    return True
 
 
-def _activate_window(hwnd: int, timeout: float = 10.0) -> bool:
-    """Bring window to foreground and wait until it's active."""
-    if not HAS_WIN32:
-        return False
-    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    win32gui.SetForegroundWindow(hwnd)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if win32gui.GetForegroundWindow() == hwnd:
-            return True
-        time.sleep(0.1)
-    log.warning("Window hwnd=%s did not become foreground within %.1fs", hwnd, timeout)
-    return False
-
-
-def _wait_for_window(title: str, timeout: float = 10.0) -> gw.Win32Window | None:
-    """Wait until a window with *title* appears."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        wins = gw.getWindowsWithTitle(title)
-        if wins:
-            return wins[0]
-        time.sleep(0.2)
+def find_comet_window(timeout=10):
+    """Find Comet window by class name."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for c in auto.GetRootControl().GetChildren():
+            if c.ClassName == "Chrome_WidgetWin_1" and "comet" in (c.Name or "").lower():
+                log(f"Found Comet: {c.Name}")
+                return c
+        time.sleep(0.5)
+    log("Comet window not found")
     return None
 
 
-def _wait_for_window_count(exe_name: str, count: int, timeout: float = 10.0) -> list[tuple[int, int]]:
-    """Wait until at least *count* windows exist for *exe_name*."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        wins = _find_windows_by_exe(exe_name)
-        if len(wins) >= count:
-            return wins
-        time.sleep(0.1)
-    return _find_windows_by_exe(exe_name)
-
-
-# ---------------------------------------------------------------------------
-# Comet voice (replaces open-comet-voice.ahk)
-# ---------------------------------------------------------------------------
-
+# ── Comet voice activation ──────────────────────────────────
 
 def open_comet_voice(target_url: str | None = None) -> bool:
     """
-    Open Comet browser with a fresh session and optionally navigate to target_url,
-    then activate voice mode with Alt+Shift+V.
+    Open Comet with fresh session, navigate to URL, activate voice mode.
 
-    Returns True on success.
+    Uses the two-window trick for session isolation.
+    Keyboard shortcuts for URL bar (Ctrl+L) and voice (Alt+Shift+V).
     """
-    log.info("open_comet_voice starting — target_url=%s", target_url or "(none)")
+    log("=== open_comet_voice starting ===")
 
-    if not HAS_WIN32:
-        log.error("pywin32 is required for window management")
+    # 1. Kill existing Comet
+    kill_comet()
+
+    # 2. Launch first Comet window
+    if not launch_comet():
+        return False
+    time.sleep(5)
+
+    # 3. Launch second window (fresh session trick)
+    if not launch_comet():
+        return False
+    time.sleep(3)
+
+    # 4. Find and close the first Comet window, keep the second
+    comet_windows = []
+    for c in auto.GetRootControl().GetChildren():
+        if c.ClassName == "Chrome_WidgetWin_1" and "comet" in (c.Name or "").lower():
+            comet_windows.append(c)
+
+    if len(comet_windows) < 1:
+        log("No Comet windows found")
         return False
 
-    # --- Close existing Comet windows ---
-    existing = _find_windows_by_exe(COMET_EXE_NAME)
-    log.info("Found %d existing Comet window(s)", len(existing))
-    for hwnd, _pid in existing:
-        _close_window(hwnd)
-    if existing:
-        time.sleep(1.0)
+    if len(comet_windows) >= 2:
+        # Close the first one
+        first = comet_windows[0]
+        first_rect = first.BoundingRectangle
+        pyautogui.click(first_rect.right - 15, first_rect.top + 10)
+        time.sleep(1)
+        log("Closed first Comet window")
 
-    # --- First Comet window ---
-    if not COMET_PATH.is_file():
-        log.error("Comet not found at %s", COMET_PATH)
+    # 5. Find remaining Comet window and bring to foreground
+    comet = find_comet_window(timeout=5)
+    if not comet:
+        log("Comet window lost after closing first")
         return False
 
-    log.info("Launching first Comet window...")
-    subprocess.Popen([str(COMET_PATH)], cwd=str(COMET_PATH.parent))
+    # Activate by clicking title bar
+    rect = comet.BoundingRectangle
+    pyautogui.click(rect.left + 100, rect.top + 10)
+    time.sleep(1)
 
-    first_windows = _wait_for_window_count(COMET_EXE_NAME, 1, timeout=10)
-    if not first_windows:
-        log.error("First Comet window did not appear")
-        return False
-
-    first_hwnd, _ = first_windows[0]
-    log.info("First Comet window: hwnd=%s", first_hwnd)
-
-    time.sleep(5)  # match AHK's 5s delay
-
-    # --- Second Comet window (fresh-session trick) ---
-    log.info("Launching second Comet window...")
-    subprocess.Popen([str(COMET_PATH)], cwd=str(COMET_PATH.parent))
-
-    second_windows = _wait_for_window_count(COMET_EXE_NAME, 2, timeout=10)
-    if len(second_windows) < 2:
-        log.error("Could not find two Comet windows (found %d)", len(second_windows))
-        return False
-
-    # Identify the new window (not first_hwnd)
-    second_hwnd = None
-    for hwnd, pid in second_windows:
-        if hwnd != first_hwnd:
-            second_hwnd = hwnd
-            break
-
-    if second_hwnd is None:
-        log.error("Could not identify second Comet window")
-        return False
-
-    log.info("Second Comet window: hwnd=%s", second_hwnd)
-
-    # Close the first window
-    _close_window(first_hwnd)
-    log.info("Closed first window (hwnd=%s)", first_hwnd)
-    time.sleep(0.5)
-
-    # Activate the second window
-    activated = _activate_window(second_hwnd)
-    if not activated:
-        log.warning("Second Comet window activation uncertain — continuing anyway")
-    else:
-        log.info("Activated second window (hwnd=%s)", second_hwnd)
-
-    # --- Navigate to target URL ---
+    # 6. Navigate to URL if provided
     if target_url:
+        log(f"Navigating to: {target_url}")
+        pyautogui.hotkey("ctrl", "l")
         time.sleep(0.5)
-        log.info("Navigating to target URL: %s", target_url)
-
-        # Ctrl+L with explicit key events — pyautogui.hotkey is too fast for Electron
-        pyautogui.keyDown("ctrl")
-        time.sleep(0.05)
-        pyautogui.press("l")
-        time.sleep(0.05)
-        pyautogui.keyUp("ctrl")
-        time.sleep(0.5)
-
-        pyautogui.write(target_url, interval=0.03)
-        time.sleep(0.5)
+        pyperclip.copy(target_url)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.3)
         pyautogui.press("enter")
-        log.info("URL entered and Enter sent")
-        time.sleep(2)
+        time.sleep(3)
+        log("URL navigated")
 
-    # --- Activate voice mode ---
-    log.info("Activating voice mode (Alt+Shift+V)")
-    # Re-activate window in case focus shifted during navigation
-    _activate_window(second_hwnd, timeout=3)
+    # 7. Activate voice mode (Alt+Shift+V)
+    log("Activating voice mode (Alt+Shift+V)")
+    pyautogui.click(rect.left + 200, rect.top + 200)
     time.sleep(0.3)
-    pyautogui.keyDown("alt")
-    time.sleep(0.05)
-    pyautogui.keyDown("shift")
-    time.sleep(0.05)
-    pyautogui.press("v")
-    time.sleep(0.05)
-    pyautogui.keyUp("shift")
-    time.sleep(0.05)
-    pyautogui.keyUp("alt")
-    log.info("Voice mode keystroke sent")
-    time.sleep(3)  # wait for voice mode to fully activate before next step steals focus
+    pyautogui.hotkey("alt", "shift", "v")
+    time.sleep(2)
+    log("Voice mode keystroke sent")
 
-    log.info("open_comet_voice done")
+    log("=== open_comet_voice done ===")
     return True
 
 
-# ---------------------------------------------------------------------------
-# Phone Link call (replaces enter_number_2.ahk)
-# ---------------------------------------------------------------------------
-
+# ── Phone Link call (AHK) ───────────────────────────────────
 
 def enter_number(phone: str) -> bool:
     """
-    Open Phone Link, switch to Calls panel, enter *phone*, press Enter to call
-    (Phone Link auto-selects the call button after number entry), then close.
+    Dial phone number via Phone Link using the proven AHK script.
 
-    Returns True on success.
+    This is the same phone_call.ahk used by telegram-call repo.
     """
-    log.info("enter_number starting — phone=%s", phone)
+    log(f"=== enter_number (AHK) — phone={phone} ===")
 
-    if not HAS_WIN32:
-        log.error("pywin32 is required for window management")
+    if not AUTOHOTKEY_EXE.is_file():
+        log(f"AHK not found: {AUTOHOTKEY_EXE}")
         return False
 
-    # --- Close Phone Link to refresh state ---
-    wins = gw.getWindowsWithTitle(PHONE_LINK_TITLE)
-    if wins:
-        log.info("Closing Phone Link to freshen state...")
-        wins[0].close()
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            if not gw.getWindowsWithTitle(PHONE_LINK_TITLE):
-                break
-            time.sleep(0.2)
-        time.sleep(0.5)
-
-    # --- Open Phone Link ---
-    log.info("Launching Phone Link via %s", PHONE_LINK_URI)
-    os.startfile(PHONE_LINK_URI)
-
-    pl_win = _wait_for_window(PHONE_LINK_TITLE, timeout=15)
-    if not pl_win:
-        log.error("Phone Link did not launch within 15s")
+    if not PHONE_CALL_AHK.is_file():
+        log(f"AHK script not found: {PHONE_CALL_AHK}")
         return False
 
-    time.sleep(2.0)  # extra load time for full render
+    try:
+        result = subprocess.run(
+            [str(AUTOHOTKEY_EXE), str(PHONE_CALL_AHK), phone],
+            capture_output=True, timeout=60,
+        )
+        log(f"AHK exited with code {result.returncode}")
+    except subprocess.TimeoutExpired:
+        log("AHK script timed out after 60s")
+        return False
+    except Exception as e:
+        log(f"AHK execution error: {e}")
+        return False
 
-    # --- Switch to Calls panel ---
-    pl_win.activate()
-    time.sleep(0.3)
-    pyautogui.hotkey("ctrl", "3")
-    log.info("Switched to Calls panel (Ctrl+3)")
-    time.sleep(0.5)
-
-    # --- Type phone number ---
-    pyautogui.typewrite(phone, interval=0.02)
-    log.info("Phone number typed: %s", phone)
-    time.sleep(0.2)  # brief wait for Phone Link to auto-select call button
-
-    # --- Press Enter to initiate call ---
-    pyautogui.press("enter")
-    log.info("Enter pressed — Phone Link auto-selects call button")
-    time.sleep(0.5)
-
-    # --- Close Phone Link ---
-    wins = gw.getWindowsWithTitle(PHONE_LINK_TITLE)
-    if wins:
-        wins[0].close()
-
-    log.info("enter_number done")
-    return True
+    log("=== enter_number done ===")
+    return result.returncode == 0
 
 
-# ---------------------------------------------------------------------------
-# Combined runner
-# ---------------------------------------------------------------------------
-
+# ── Combined runner ─────────────────────────────────────────
 
 def run_comet_then_call(phone: str = HARDCODED_PHONE, target_url: str | None = None) -> tuple[bool, bool]:
-    """Run both steps: open Comet voice, then dial phone."""
     comet_ok = open_comet_voice(target_url)
     call_ok = enter_number(phone)
     return comet_ok, call_ok
@@ -371,14 +215,9 @@ def read_target_url() -> str | None:
     return url or None
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
+# ── CLI ─────────────────────────────────────────────────────
 
 def main() -> None:
-    _setup_logging()
-
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
