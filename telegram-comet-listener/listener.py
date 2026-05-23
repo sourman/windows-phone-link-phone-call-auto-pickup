@@ -148,6 +148,42 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Retry config
+# ---------------------------------------------------------------------------
+
+MAX_RETRIES = 999
+BASE_DELAY = 5          # seconds — first retry after 5s
+MAX_DELAY = 300         # cap at 5 minutes
+
+
+def _run_with_backoff(token: str) -> None:
+    """Start polling with exponential backoff on transient errors."""
+    app = Application.builder().token(token).build()
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            log.info(
+                "Telegram watcher started (attempt %d/%d) — polling COMET -> pyautomation",
+                attempt, MAX_RETRIES,
+            )
+            app.run_polling(allowed_updates=Update.ALL_TYPES)
+            # If run_polling returns cleanly, we're done (user stopped it).
+            return
+        except Exception as exc:
+            delay = min(BASE_DELAY * (2 ** (attempt - 1)), MAX_DELAY)
+            log.exception(
+                "run_polling crashed (attempt %d/%d), retrying in %ds: %s",
+                attempt, MAX_RETRIES, delay, exc,
+            )
+            if attempt == MAX_RETRIES:
+                log.error("Max retries (%d) reached — giving up.", MAX_RETRIES)
+                raise
+            import time as _time
+            _time.sleep(delay)
+
+
 def main() -> None:
     if ENV_PATH.is_file():
         load_dotenv(ENV_PATH)
@@ -170,15 +206,7 @@ def main() -> None:
     for handler in logging.root.handlers:
         handler.setFormatter(redacting_fmt)
 
-    app = Application.builder().token(token).build()
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-
-    log.info("Telegram watcher started — polling COMET -> pyautomation (open_comet_voice + enter_number)")
-    try:
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
-    except Exception:
-        log.exception("run_polling crashed, exiting")
-        sys.exit(1)
+    _run_with_backoff(token)
 
 
 if __name__ == "__main__":
