@@ -119,9 +119,12 @@ def find_comet_window(timeout=10):
     deadline = time.time() + timeout
     while time.time() < deadline:
         for c in auto.GetRootControl().GetChildren():
-            if c.ClassName == "Chrome_WidgetWin_1" and "comet" in (c.Name or "").lower():
-                log(f"Found Comet: {c.Name}")
-                return c
+            try:
+                if c.ClassName == "Chrome_WidgetWin_1" and "comet" in (c.Name or "").lower():
+                    log(f"Found Comet: {c.Name}")
+                    return c
+            except Exception:
+                pass
         time.sleep(0.5)
     log("Comet window not found")
     return None
@@ -154,8 +157,11 @@ def open_comet_voice(target_url: str | None = None) -> bool:
     # 4. Find and close the first Comet window, keep the second
     comet_windows = []
     for c in _get_root_children():
-        if c.ClassName == "Chrome_WidgetWin_1" and "comet" in (c.Name or "").lower():
-            comet_windows.append(c)
+        try:
+            if c.ClassName == "Chrome_WidgetWin_1" and "comet" in (c.Name or "").lower():
+                comet_windows.append(c)
+        except Exception:
+            pass  # skip stale elements
 
     if len(comet_windows) < 1:
         log("No Comet windows found")
@@ -226,23 +232,29 @@ def _find_phone_link():
     best = None
     best_w = 0
     for c in _get_root_children():
-        if c.ClassName == "WinUIDesktopWin32WindowClass" and "phone link" in (c.Name or "").lower():
-            rect = c.BoundingRectangle
-            w = rect.right - rect.left
-            if w > best_w:
-                best = c
-                best_w = w
+        try:
+            if c.ClassName == "WinUIDesktopWin32WindowClass" and "phone link" in (c.Name or "").lower():
+                rect = c.BoundingRectangle
+                w = rect.right - rect.left
+                if w > best_w:
+                    best = c
+                    best_w = w
+        except Exception:
+            pass
     return best
 
 
 def _find_call_window():
     """Find the active Phone Link call window (smaller popup)."""
     for c in _get_root_children():
-        if c.ClassName == "WinUIDesktopWin32WindowClass" and "phone link" in (c.Name or "").lower():
-            rect = c.BoundingRectangle
-            w = rect.right - rect.left
-            if w < 800:
-                return c
+        try:
+            if c.ClassName == "WinUIDesktopWin32WindowClass" and "phone link" in (c.Name or "").lower():
+                rect = c.BoundingRectangle
+                w = rect.right - rect.left
+                if w < 800:
+                    return c
+        except Exception:
+            pass
     return None
 
 
