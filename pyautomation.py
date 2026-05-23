@@ -328,8 +328,15 @@ def enter_number(phone: str) -> bool:
             break
     time.sleep(3)
 
-    # Verify call started — look for call window with EndCallButton
-    call_win = _find_call_window()
+    # Wait for call window to appear (can take 7-10 seconds)
+    call_win = None
+    for attempt in range(10):
+        call_win = _find_call_window()
+        if call_win:
+            break
+        time.sleep(1)
+    if not call_win:
+        log("Call window not found after 10s — call may have failed")
     if call_win:
         # Check if call is on PC (not on mobile)
         for area in call_win.GetChildren():
