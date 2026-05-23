@@ -1,16 +1,17 @@
 """
-Auto-pickup — UIA-based Comet voice activation + AHK Phone Link calling.
+Auto-pickup — UIA-based Comet voice activation + Phone Link calling.
 
 Comet launching: UIA window discovery + keyboard shortcuts
-Phone Link calling: delegates to phone_call.ahk (proven reliable, same as telegram-call)
+Phone Link calling: UIA tree navigation + keypad coordinate clicks + Enter
 
 Usage:
   python pyautomation.py comet [target_url]
   python pyautomation.py call <phone_number>
+  python pyautomation.py endcall
   python pyautomation.py both [target_url] [phone_number]
 
 Dependencies:
-  pip install uiautomation pyautogui pyperclip psutil
+  pip install uiautomation pyautogui psutil
 """
 from __future__ import annotations
 
@@ -24,6 +25,10 @@ from pathlib import Path
 sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', errors='replace', closefd=False)
 sys.stderr = open(sys.stderr.fileno(), mode='w', encoding='utf-8', errors='replace', closefd=False)
 
+import ctypes
+
+u32 = ctypes.windll.user32
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOG_FILE = SCRIPT_DIR / "pyautomation.log"
 TARGET_URL_FILE = SCRIPT_DIR / "target_url.txt"
@@ -31,10 +36,6 @@ TARGET_URL_FILE = SCRIPT_DIR / "target_url.txt"
 # ── Config ──────────────────────────────────────────────────
 COMET_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Perplexity" / "Comet" / "Application" / "comet.exe"
 HARDCODED_PHONE = "01280043725"
-
-# Phone Link calling via AHK (same proven script from telegram-call repo)
-AUTOHOTKEY_EXE = Path(os.environ.get("ProgramFiles", "")) / "AutoHotkey" / "v2" / "AutoHotkey64.exe"
-PHONE_CALL_AHK = SCRIPT_DIR / "phone_call.ahk"
 
 # ── Logging ─────────────────────────────────────────────────
 logging.basicConfig(
@@ -45,18 +46,50 @@ logging.basicConfig(
 log = logging.info
 
 # ── Imports ─────────────────────────────────────────────────
-# UIA is imported lazily to avoid CoInitialize issues with pythonw.exe
 import pyautogui
 import psutil
 
-pyautogui.FAILSAFE = True
+pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0.03
+
+
+def _force_foreground(hwnd: int) -> bool:
+    """Bring window to foreground using ALT key bypass for SetForegroundWindow."""
+    u32.keybd_event(0x12, 0, 0, 0)       # ALT down
+    u32.keybd_event(0x12, 0, 0x0002, 0)  # ALT up
+    u32.ShowWindow(hwnd, 9)               # SW_RESTORE
+    return bool(u32.SetForegroundWindow(hwnd))
 
 
 def _ensure_uia():
     """Lazy import UIA — only when actually needed for automation."""
     import uiautomation as auto
     return auto
+
+
+_SKIP_SUBTREES = frozenset([
+    "NotificationsList", "NotificationsListScrollHost",
+    "PaneContent", "MainContentGrid", "PinnedNotificationsList",
+])
+
+
+def _find_by_autoid(ctrl, target_aid: str, depth: int = 0):
+    """Recursively find a control by AutomationId, skipping notification subtrees."""
+    if depth > 20:
+        return None
+    try:
+        for child in ctrl.GetChildren():
+            aid = child.AutomationId or ""
+            if aid == target_aid:
+                return child
+            if aid in _SKIP_SUBTREES:
+                continue
+            result = _find_by_autoid(child, target_aid, depth + 1)
+            if result:
+                return result
+    except Exception:
+        pass
+    return None
 
 
 # ── Comet helpers ───────────────────────────────────────────
@@ -119,9 +152,8 @@ def open_comet_voice(target_url: str | None = None) -> bool:
     time.sleep(3)
 
     # 4. Find and close the first Comet window, keep the second
-    auto = _ensure_uia()
     comet_windows = []
-    for c in auto.GetRootControl().GetChildren():
+    for c in _get_root_children():
         if c.ClassName == "Chrome_WidgetWin_1" and "comet" in (c.Name or "").lower():
             comet_windows.append(c)
 
@@ -145,8 +177,10 @@ def open_comet_voice(target_url: str | None = None) -> bool:
 
     # Activate by clicking title bar
     rect = comet.BoundingRectangle
+    _force_foreground(comet.NativeWindowHandle)
+    time.sleep(0.5)
     pyautogui.click(rect.left + 100, rect.top + 10)
-    time.sleep(1)
+    time.sleep(0.5)
 
     # 6. Navigate to URL if provided
     if target_url:
@@ -173,39 +207,164 @@ def open_comet_voice(target_url: str | None = None) -> bool:
     return True
 
 
-# ── Phone Link call (AHK) ───────────────────────────────────
+# ── Phone Link call (UIA) ───────────────────────────────────
+
+def _get_root_children():
+    """Get root UIA children with retry — tree walker can crash transiently."""
+    auto = _ensure_uia()
+    for attempt in range(3):
+        try:
+            return list(auto.GetRootControl().GetChildren())
+        except Exception:
+            log(f"UIA tree walk failed (attempt {attempt+1}/3), retrying...")
+            time.sleep(0.5 * (attempt + 1))
+    return []
+
+
+def _find_phone_link():
+    """Find main Phone Link window via UIA."""
+    best = None
+    best_w = 0
+    for c in _get_root_children():
+        if c.ClassName == "WinUIDesktopWin32WindowClass" and "phone link" in (c.Name or "").lower():
+            rect = c.BoundingRectangle
+            w = rect.right - rect.left
+            if w > best_w:
+                best = c
+                best_w = w
+    return best
+
+
+def _find_call_window():
+    """Find the active Phone Link call window (smaller popup)."""
+    for c in _get_root_children():
+        if c.ClassName == "WinUIDesktopWin32WindowClass" and "phone link" in (c.Name or "").lower():
+            rect = c.BoundingRectangle
+            w = rect.right - rect.left
+            if w < 800:
+                return c
+    return None
+
 
 def enter_number(phone: str) -> bool:
     """
-    Dial phone number via Phone Link using the proven AHK script.
+    Dial phone number via Phone Link using UIA SetValue + click.
 
-    This is the same phone_call.ahk used by telegram-call repo.
+    Maximizes Phone Link, switches to dialer (Ctrl+3), sets the number
+    via UIA SetValue on the search field, presses Enter to transfer to
+    dialer, then clicks the Call button. Verifies the call is on PC.
     """
-    log(f"=== enter_number (AHK) — phone={phone} ===")
+    log(f"=== enter_number (UIA) — phone={phone} ===")
 
-    if not AUTOHOTKEY_EXE.is_file():
-        log(f"AHK not found: {AUTOHOTKEY_EXE}")
-        return False
-
-    if not PHONE_CALL_AHK.is_file():
-        log(f"AHK script not found: {PHONE_CALL_AHK}")
+    pl = _find_phone_link()
+    if not pl:
+        log("Phone Link window not found")
         return False
 
-    try:
-        result = subprocess.run(
-            [str(AUTOHOTKEY_EXE), str(PHONE_CALL_AHK), phone],
-            capture_output=True, timeout=60,
-        )
-        log(f"AHK exited with code {result.returncode}")
-    except subprocess.TimeoutExpired:
-        log("AHK script timed out after 60s")
+    # Force foreground first, then maximize (order matters — _force_foreground restores window)
+    hwnd = pl.NativeWindowHandle
+    _force_foreground(hwnd)
+    time.sleep(0.3)
+    u32.ShowWindow(hwnd, 3)   # SW_MAXIMIZE
+    time.sleep(0.5)
+
+    # Click inside window to ensure keyboard focus, then Ctrl+3
+    rect = pl.BoundingRectangle
+    pyautogui.click(rect.left + 400, rect.top + 200)
+    time.sleep(0.3)
+    pyautogui.hotkey("ctrl", "3")
+    time.sleep(1)
+
+    # Sanity check: verify keypad is visible
+    pl = _find_phone_link()
+    if not pl:
+        log("Phone Link lost after maximize")
         return False
-    except Exception as e:
-        log(f"AHK execution error: {e}")
+    keypad = _find_by_autoid(pl, "Keypad")
+    if not keypad:
+        log("Keypad not found — dialer not active")
         return False
+    log("Dialer confirmed active")
+
+    # Set phone number in the contact search field via UIA (instant)
+    search_box = _find_by_autoid(pl, "ContactSuggestionsBox")
+    edit = _find_by_autoid(search_box, "TextBox") if search_box else None
+    if not edit:
+        log("Search TextBox not found")
+        return False
+    edit.GetValuePattern().SetValue(phone)
+    log(f"Set search field to: {phone}")
+    time.sleep(0.3)
+
+    # Enter transfers the number from search to the dialer
+    pyautogui.press("enter")
+    time.sleep(0.3)
+
+    # Click the Call button (coordinate click, already visible when maximized)
+    pl = _find_phone_link()
+    keypad = _find_by_autoid(pl, "Keypad")
+    if not keypad:
+        log("Keypad lost after Enter")
+        return False
+    for child in keypad.GetChildren():
+        if child.AutomationId == "ButtonCall":
+            btn_rect = child.BoundingRectangle
+            cx = (btn_rect.left + btn_rect.right) // 2
+            cy = (btn_rect.top + btn_rect.bottom) // 2
+            pyautogui.click(cx, cy)
+            log("Call button clicked")
+            break
+    time.sleep(3)
+
+    # Verify call started — look for call window with EndCallButton
+    call_win = _find_call_window()
+    if call_win:
+        # Check if call is on PC (not on mobile)
+        for area in call_win.GetChildren():
+            def find_transfer(ctrl, depth=0):
+                if depth > 10: return None
+                try:
+                    for ch in ctrl.GetChildren():
+                        n = (ch.Name or "").lower()
+                        if "transfer to mobile" in n or "send call to mobile" in n:
+                            return ch
+                        r = find_transfer(ch, depth + 1)
+                        if r: return r
+                except: pass
+                return None
+            transfer_btn = find_transfer(area)
+            if transfer_btn:
+                log(f"Call on PC (transfer button present: {transfer_btn.Name!r})")
+                break
+        else:
+            log("Call window found but transfer button not located")
+        log("Call successfully initiated on PC")
+    else:
+        log("Call window not found — call may have failed")
 
     log("=== enter_number done ===")
-    return result.returncode == 0
+    return True
+
+
+def end_call() -> bool:
+    """End active Phone Link call via UIA."""
+    log("=== end_call (UIA) ===")
+
+    call_win = _find_call_window()
+    if not call_win:
+        log("No active call window found")
+        return False
+
+    end_btn = _find_by_autoid(call_win, "EndCallButton")
+    if not end_btn:
+        log("EndCallButton not found")
+        return False
+
+    end_btn.GetInvokePattern().Invoke(waitTime=0)
+    log("Call ended")
+
+    log("=== end_call done ===")
+    return True
 
 
 # ── Combined runner ─────────────────────────────────────────
@@ -240,6 +399,10 @@ def main() -> None:
     elif cmd == "call":
         phone = sys.argv[2] if len(sys.argv) > 2 else HARDCODED_PHONE
         ok = enter_number(phone)
+        sys.exit(0 if ok else 1)
+
+    elif cmd == "endcall":
+        ok = end_call()
         sys.exit(0 if ok else 1)
 
     elif cmd == "both":
