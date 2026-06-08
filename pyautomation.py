@@ -27,6 +27,12 @@ sys.stderr = open(sys.stderr.fileno(), mode='w', encoding='utf-8', errors='repla
 
 import ctypes
 
+# DPI awareness for correct coordinate calculations on high-DPI displays
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+except (AttributeError, OSError):
+    pass  # shcore not available on older Windows
+
 u32 = ctypes.windll.user32
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -168,12 +174,15 @@ def open_comet_voice(target_url: str | None = None) -> bool:
         return False
 
     if len(comet_windows) >= 2:
-        # Close the first one
-        first = comet_windows[0]
-        first_rect = first.BoundingRectangle
-        pyautogui.click(first_rect.right - 15, first_rect.top + 10)
+        # Close the LAST (oldest/background) one.
+        # Root children are in Z-order (topmost first), so
+        # comet_windows[0] is the foreground window — that's the
+        # fresh second launch we want to keep.
+        old = comet_windows[-1]
+        old_rect = old.BoundingRectangle
+        pyautogui.click(old_rect.right - 15, old_rect.top + 10)
         time.sleep(1)
-        log("Closed first Comet window")
+        log("Closed old Comet window (kept foreground)")
 
     # 5. Find remaining Comet window and bring to foreground
     comet = find_comet_window(timeout=5)
@@ -244,6 +253,45 @@ def _find_phone_link():
     return best
 
 
+def _get_phone_link_aumid() -> str | None:
+    """Resolve Phone Link's AUMID dynamically via Get-AppxPackage."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-Command",
+             "Get-AppxPackage *YourPhone* | Select -ExpandProperty PackageFamilyName"],
+            capture_output=True, text=True, timeout=10,
+        )
+        name = result.stdout.strip()
+        if name:
+            return f"shell:AppsFolder\\{name}!App"
+    except Exception:
+        pass
+    return None
+
+
+def _ensure_phone_link():
+    """Find Phone Link window, launching it if not running."""
+    pl = _find_phone_link()
+    if pl:
+        log("Phone Link already running")
+        return pl
+
+    # Try dynamic AUMID first, fall back to hardcoded
+    aumid = _get_phone_link_aumid() or "shell:AppsFolder\\Microsoft.YourPhone_8wekyb3d8bbwe!App"
+    log(f"Launching Phone Link via {aumid}")
+    subprocess.Popen(["explorer.exe", aumid])
+
+    for attempt in range(15):
+        time.sleep(1)
+        pl = _find_phone_link()
+        if pl:
+            log(f"Phone Link launched (attempt {attempt + 1})")
+            return pl
+
+    log("Phone Link failed to launch")
+    return None
+
+
 def _find_call_window():
     """Find the active Phone Link call window (smaller popup)."""
     for c in _get_root_children():
@@ -268,9 +316,9 @@ def enter_number(phone: str) -> bool:
     """
     log(f"=== enter_number (UIA) — phone={phone} ===")
 
-    pl = _find_phone_link()
+    pl = _ensure_phone_link()
     if not pl:
-        log("Phone Link window not found")
+        log("Phone Link not available")
         return False
 
     # Force foreground first, then maximize (order matters — _force_foreground restores window)
@@ -328,40 +376,42 @@ def enter_number(phone: str) -> bool:
             break
     time.sleep(3)
 
-    # Wait for call window to appear (can take 7-10 seconds)
+    # Wait for call window to appear (up to 20s)
     call_win = None
-    for attempt in range(10):
+    for attempt in range(20):
         call_win = _find_call_window()
         if call_win:
             break
         time.sleep(1)
     if not call_win:
-        log("Call window not found after 10s — call may have failed")
-    if call_win:
-        # Check if call is on PC (not on mobile)
-        for area in call_win.GetChildren():
-            def find_transfer(ctrl, depth=0):
-                if depth > 10: return None
-                try:
-                    for ch in ctrl.GetChildren():
-                        n = (ch.Name or "").lower()
-                        if "transfer to mobile" in n or "send call to mobile" in n:
-                            return ch
-                        r = find_transfer(ch, depth + 1)
-                        if r: return r
-                except: pass
-                return None
-            transfer_btn = find_transfer(area)
-            if transfer_btn:
-                log(f"Call on PC (transfer button present: {transfer_btn.Name!r})")
-                break
-        else:
-            log("Call window found but transfer button not located")
-        log("Call successfully initiated on PC")
-    else:
-        log("Call window not found — call may have failed")
+        log("Call window not found after 20s — call failed")
+        return False
 
-    log("=== enter_number done ===")
+    # Check if call is on PC (not on mobile) by looking for transfer button
+    transfer_found = False
+    for area in call_win.GetChildren():
+        def find_transfer(ctrl, depth=0):
+            if depth > 10: return None
+            try:
+                for ch in ctrl.GetChildren():
+                    n = (ch.Name or "").lower()
+                    if "transfer to mobile" in n or "send call to mobile" in n:
+                        return ch
+                    r = find_transfer(ch, depth + 1)
+                    if r: return r
+            except Exception: pass
+            return None
+        transfer_btn = find_transfer(area)
+        if transfer_btn:
+            log(f"Call on PC (transfer button present: {transfer_btn.Name!r})")
+            transfer_found = True
+            break
+
+    if not transfer_found:
+        log("Call window found but audio routing could not be confirmed on PC")
+        return False
+
+    log("=== enter_number done — call active on PC ===")
     return True
 
 

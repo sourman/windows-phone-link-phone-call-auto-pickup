@@ -4,3 +4,21 @@ call-on-sms-number.txt
 **/*__pycache__
 **/*.env.**
 **/*.venv
+
+# Runtime state
+**/liveness.txt
+**/heartbeat.txt
+**/comet-watchdog.pid
+**/comet-watchdog-state.json
+**/stderr.log
+**/stderr-test.log
+**/stdout-test.log
+**/dns-test-result.txt
+
+# Screenshots / debug artifacts
+screenshots/
+test_screenshots/
+*.png
+
+# Claude settings
+.claude/
